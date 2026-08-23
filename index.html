@@ -1,0 +1,110 @@
+<!--
+  PROTOTIPE: Simulator Payroll v2 — Watson Wyatt Based
+  TOOLS: HTML5, Tailwind CSS CDN, Chart.js CDN, JS Vanila (ES6+)
+  CARA JALAN: buka index.html di browser / npx serve / python -m http.server
+-->
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Simulasi Payroll v2 — Watson Wyatt × UMK Jatim</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body class="bg-slate-50 text-slate-900 font-sans antialiased">
+
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <h2 class="text-base font-extrabold tracking-tight text-white leading-tight">Payroll Simulator</h2>
+      <p class="text-[10px] text-slate-400 mt-0.5">Watson Wyatt × UMK Jatim</p>
+    </div>
+
+    <nav class="flex-1 py-3">
+      <div class="sidebar-item active" data-menu="menu1">
+        <span class="icon">&#128202;</span>
+        <span class="sidebar-text">Watson Factors</span>
+      </div>
+      <div class="sidebar-item" data-menu="menu2">
+        <span class="icon">&#9881;</span>
+        <span class="sidebar-text">Parameter</span>
+      </div>
+      <div class="sidebar-item" data-menu="menu3">
+        <span class="icon">&#128200;</span>
+        <span class="sidebar-text">Simulasi</span>
+      </div>
+      <div class="sidebar-item" data-menu="menu4">
+        <span class="icon">&#128203;</span>
+        <span class="sidebar-text">Perbandingan</span>
+      </div>
+      <div class="sidebar-item" data-menu="menu5">
+        <span class="icon">&#128200;</span>
+        <span class="sidebar-text">Spread Table</span>
+      </div>
+      <div class="sidebar-item" data-menu="menu6">
+        <span class="icon">&#128218;</span>
+        <span class="sidebar-text">Alur Formula</span>
+      </div>
+    </nav>
+
+    <div class="sidebar-footer">
+      <button id="btn-reset" class="w-full text-center text-[11px] font-semibold text-slate-400 hover:text-white transition-colors py-2 rounded border border-slate-700 hover:border-slate-500">
+        Reset Semua
+      </button>
+      <p class="text-[9px] text-slate-600 text-center mt-2">v2.0 — 2026</p>
+    </div>
+  </aside>
+
+  <!-- SCHEME TOGGLE -->
+  <div class="main-content">
+    <div class="flex justify-center mb-6">
+      <div class="inline-flex rounded-lg border border-slate-200 bg-white p-1 shadow-sm">
+        <button id="btn-skema-lama" class="scheme-btn active" onclick="toggleScheme('skema-lama')">
+          <span class="mr-1">&#128203;</span> Skema Lama
+        </button>
+        <button id="btn-skema-gapok" class="scheme-btn" onclick="toggleScheme('skema-gapok')">
+          <span class="mr-1">&#128176;</span> Skema Gaji Pokok
+        </button>
+      </div>
+    </div>
+    <!-- Section 1: Watson Factors -->
+    <section id="section-menu1" class="content-section">
+      <div id="menu1-container"></div>
+    </section>
+
+    <!-- Section 2: Parameters -->
+    <section id="section-menu2" class="content-section hidden">
+      <div id="menu2-container"></div>
+    </section>
+
+    <!-- Section 3: Simulation -->
+    <section id="section-menu3" class="content-section hidden">
+      <div id="menu3-container"></div>
+    </section>
+
+    <!-- Section 4: Comparison -->
+    <section id="section-menu4" class="content-section hidden">
+      <div id="menu4-container"></div>
+    </section>
+
+    <!-- Section 5: Spread Table -->
+    <section id="section-menu5" class="content-section hidden">
+      <div id="menu5-container"></div>
+    </section>
+
+    <!-- Section 6: Alur Formula -->
+    <section id="section-menu6" class="content-section hidden">
+      <div id="menu6-container"></div>
+    </section>
+  </div>
+
+  <!-- SCRIPTS (order matters) -->
+  <script src="js/data.js"></script>
+  <script src="js/formulas.js"></script>
+  <script src="js/charts.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
