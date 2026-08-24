@@ -10,6 +10,9 @@ let jvScores = {};   // { 'D1': {K:2,E:1,...}, ... }
 let params = {};
 let compLocations = ['Kota Surabaya', 'Kota Malang'];
 let currentScheme = 'skema-lama';
+let paramMode = 'manual';        // 'manual' | 'watson' — sumber parameter anchor
+let watsonResult = null;         // hasil terakhir calcWatsonAnchors (untuk panel Menu 2)
+let _watsonRecalcTimer = null;   // debounce auto-recompute saat skor JV berubah
 
 // ---- Sidebar Navigation ----
 function showMenu(menuId) {
@@ -176,12 +179,16 @@ function onScoreChange(factorCode, value) {
 
     // Update radar chart
     renderRadarChart(jvScores[selectedJenjang]);
+
+    // JV berubah → jika mode Watson-Driven, jadwalkan recompute anchor (debounce 300ms)
+    scheduleWatsonRecalc();
 }
 
 function resetScores() {
     if (!confirm('Reset skor ke default?')) return;
     jvScores[selectedJenjang] = { ...DEFAULT_SCORES[selectedJenjang] };
     renderMenu1();
+    scheduleWatsonRecalc();
 }
 
 function saveJV() {
@@ -196,20 +203,31 @@ function renderMenu2() {
     const container = document.getElementById('menu2-container');
     if (!container) return;
 
+    const isWatson = paramMode === 'watson';
+
     container.innerHTML = `
-        <!-- Section A: Anchor % Gapok per Jenjang -->
+        <!-- Section W: Mesin Anchor Watson (hanya mode Watson-Driven) -->
+        ${isWatson ? buildWatsonPanelHTML() : ''}
+
+        <!-- Section A: Anchor % per Jenjang -->
         <div class="card">
-            <div class="card-title"><span>🔑</span> Anchor % Gapok per Jenjang</div>
+            <div class="card-title"><span>🔑</span> ${currentScheme === 'skema-gapok' ? 'Anchor % THP per Jenjang' : 'Anchor % Gapok per Jenjang'}</div>
             <div class="card-desc">
-                Atur persentase dasar Gaji Pokok untuk Sub-Level A pada setiap jenjang kepangkatan.
+                ${currentScheme === 'skema-gapok'
+                    ? 'Atur persentase dasar THP pada setiap jenjang kepangkatan. Gapok = THP × Composition%.'
+                    : 'Atur persentase dasar Gaji Pokok untuk Sub-Level A pada setiap jenjang kepangkatan.'}
+                ${isWatson ? '<br><span class="text-blue-600 font-semibold">Mode Watson-Driven: input di bawah adalah rancangan manual Anda (terkunci). Anchor aktif dihitung mesin di panel atas.</span>' : ''}
             </div>
             <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
                 ${Object.keys(params.anchors).map(k => {
                     const jName = JENJANG_LIST.find(j => j.code === k)?.name || k;
+                    // Input anchor selalu membaca/menulis snapshot manual (isolasi dari hasil Watson)
+                    const manVal = (params.manualAnchors && params.manualAnchors[k] !== undefined)
+                        ? params.manualAnchors[k] : params.anchors[k];
                     return `
                     <div>
-                        <label class="block text-xs font-semibold text-slate-500 mb-1">${jName}</label>
-                        <input type="number" id="p-anchor-${k}" class="input-field" value="${params.anchors[k]}" step="1">
+                        <label class="block text-xs font-semibold text-slate-500 mb-1">${jName}${isWatson ? ' <span class="watson-badge">diatur mesin Watson</span>' : ''}</label>
+                        <input type="number" id="p-anchor-${k}" class="input-field ${isWatson ? 'bg-slate-100' : ''}" value="${manVal}" step="1" ${isWatson ? 'disabled title="Mode Watson-Driven: anchor diatur mesin"' : ''}>
                     </div>
                     `;
                 }).join('')}
@@ -267,20 +285,32 @@ function renderMenu2() {
         <div class="card">
             <div class="card-title"><span>💵</span> Composition Matrix</div>
             <div class="card-desc">
-                Tentukan proporsi internal THP. Total harus = 100%.
+                ${currentScheme === 'skema-gapok'
+                    ? 'Proporsi TT & TTT dari NonGapok. TT dimultiplier per sub-level. Gapok dari Anchor (lihat di atas).'
+                    : 'Tentukan proporsi internal THP. Total harus = 100%.'}
             </div>
             <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
-                    <label class="block text-xs font-semibold text-slate-500 mb-1">Gaji Pokok (%)</label>
-                    <input type="number" id="p-gapok" class="input-field" value="${params.composition.gapok}" min="0" max="100" step="1">
+                    <label class="block text-xs font-semibold text-slate-500 mb-1">
+                        Gaji Pokok (%)
+                        ${currentScheme === 'skema-gapok' ? '<span class="text-blue-500">(anchor-based)</span>' : ''}
+                    </label>
+                    <input type="number" id="p-gapok" class="input-field ${currentScheme === 'skema-gapok' ? 'bg-slate-100' : ''}" 
+                           value="${params.composition.gapok}" min="0" max="100" step="1"
+                           ${currentScheme === 'skema-gapok' ? 'readonly title="Skema Gaji Pokok: Gapok dari Anchor, tidak dari Composition"' : ''}>
                 </div>
                 <div>
                     <label class="block text-xs font-semibold text-slate-500 mb-1">Tunjangan Tetap (%)</label>
                     <input type="number" id="p-tt" class="input-field" value="${params.composition.tt}" min="0" max="100" step="1">
                 </div>
                 <div>
-                    <label class="block text-xs font-semibold text-slate-500 mb-1">Tunjangan Tidak Tetap (%)</label>
-                    <input type="number" id="p-ttt" class="input-field" value="${params.composition.ttt}" min="0" max="100" step="1">
+                    <label class="block text-xs font-semibold text-slate-500 mb-1">
+                        Tunjangan Tidak Tetap (%)
+                        ${currentScheme === 'skema-gapok' ? '<span class="text-blue-500">(auto)</span>' : ''}
+                    </label>
+                    <input type="number" id="p-ttt" class="input-field ${currentScheme === 'skema-gapok' ? 'bg-slate-100' : ''}" 
+                           value="${params.composition.ttt}" min="0" max="100" step="1"
+                           ${currentScheme === 'skema-gapok' ? 'readonly' : ''}>
                 </div>
             </div>
             <div id="comp-validation" class="mt-3"></div>
@@ -389,9 +419,11 @@ function renderMenu2() {
     `;
 
     // Bind composition live inputs
-    document.getElementById('p-gapok').addEventListener('input', validateComposition);
-    document.getElementById('p-tt').addEventListener('input', validateComposition);
-    document.getElementById('p-ttt').addEventListener('input', validateComposition);
+    document.getElementById('p-gapok').addEventListener('input', () => { validateComposition(); updateCompositionTTT(); });
+    document.getElementById('p-tt').addEventListener('input', () => { validateComposition(); updateCompositionTTT(); });
+    if (currentScheme !== 'skema-gapok') {
+        document.getElementById('p-ttt').addEventListener('input', validateComposition);
+    }
 
     // Bind UMK change
     document.getElementById('p-umk').addEventListener('change', (e) => {
@@ -418,24 +450,243 @@ function updateStructPreview() {
 
 function validateComposition() {
     const g = Number(document.getElementById('p-gapok')?.value) || 0;
-    const tt = Number(document.getElementById('p-tt')?.value) || 0;
+    const t = Number(document.getElementById('p-tt')?.value) || 0;
     const ttt = Number(document.getElementById('p-ttt')?.value) || 0;
-    const total = g + tt + ttt;
     const el = document.getElementById('comp-validation');
     if (!el) return;
-    if (total === 100) {
-        el.innerHTML = '<span class="badge-pass">&#10003; Total = 100% — Valid</span>';
+
+    if (currentScheme === 'skema-gapok') {
+        // Skema Gaji Pokok: Gapok dari anchor, komposisi hanya tt/ttt ratio
+        if (t + ttt === 0) {
+            el.innerHTML = '<span class="badge-fail">&#10007; TT + TTT harus > 0%</span>';
+        } else {
+            el.innerHTML = `<span class="badge-pass">&#10003; TT:TTT ratio = ${t}:${ttt} (dimultiplier per sub-level)</span>`;
+        }
     } else {
-        el.innerHTML = `<span class="badge-fail">&#10007; Total = ${total}% — Harus 100%</span>`;
+        // Skema Lama: Total harus 100%
+        const total = g + t + ttt;
+        if (total === 100) {
+            el.innerHTML = '<span class="badge-pass">&#10003; Total = 100% — Valid</span>';
+        } else {
+            el.innerHTML = `<span class="badge-fail">&#10007; Total = ${total}% — Harus 100%</span>`;
+        }
     }
 }
 
+// Auto-update composition.ttt untuk skema gaji pokok
+function updateCompositionTTT() {
+    if (currentScheme !== 'skema-gapok') return;
+    const gapok = Number(document.getElementById('p-gapok')?.value) || 50;
+    const tt = Number(document.getElementById('p-tt')?.value) || 15;
+    const ttt = Math.max(0, 100 - gapok - tt);
+    const tttEl = document.getElementById('p-ttt');
+    if (tttEl) tttEl.value = ttt;
+}
+
+// =====================================================
+// PARAM MODE — Manual vs Watson-Driven
+// Isolasi dua penyimpan anchor:
+//   params.manualAnchors  → rancangan manual user (selalu terpelihara)
+//   params.anchors        → anchor AKTIF yang dibaca pipeline perhitungan
+// =====================================================
+function switchParamMode(mode) {
+    paramMode = mode === 'watson' ? 'watson' : 'manual';
+    localStorage.setItem('payroll_sim_parammode', paramMode);
+    syncActiveSources();
+    const bM = document.getElementById('btn-param-manual');
+    const bW = document.getElementById('btn-param-watson');
+    if (bM) bM.classList.toggle('active', paramMode === 'manual');
+    if (bW) bW.classList.toggle('active', paramMode === 'watson');
+    saveToStorage();
+    showMenu(currentMenu); // re-render section aktif agar konsisten
+}
+
+// Terapkan sumber anchor sesuai mode aktif ke params.anchors
+function syncActiveSources() {
+    if (!params || !params.anchors) return;
+    if (paramMode === 'watson') {
+        const res = calcWatsonAnchors(jvScores, params.watsonConfig);
+        watsonResult = res;
+        if (res.anchors) Object.assign(params.anchors, res.anchors);
+    } else {
+        watsonResult = null;
+        if (params.manualAnchors) Object.assign(params.anchors, params.manualAnchors);
+    }
+}
+
+// Knob panel Watson → update config → simpan → hitung ulang
+function onWatsonKnobChange(key, value, kind) {
+    if (!params.watsonConfig) return;
+    if (kind === 'bool')      params.watsonConfig[key] = !!value;
+    else if (kind === 'num')  params.watsonConfig[key] = Number(value) || 0;
+    else                      params.watsonConfig[key] = value;
+    saveParamsSilent();
+    recalcWatson();
+}
+
+// Hitung ulang anchor dari mesin Watson dan refresh tampilan aktif.
+// `force` dipertahankan untuk kompatibilitas tombol "Hitung Ulang Sekarang".
+function recalcWatson(force) {
+    if (paramMode !== 'watson') return;
+    const res = calcWatsonAnchors(jvScores, params.watsonConfig);
+    watsonResult = res;
+    if (res.anchors) Object.assign(params.anchors, res.anchors);
+    saveToStorage();
+    if (currentMenu === 'menu2') showMenu('menu2');
+}
+
+// Debounce 300ms — dipanggil setiap skor JV di Menu 1 berubah
+function scheduleWatsonRecalc() {
+    clearTimeout(_watsonRecalcTimer);
+    _watsonRecalcTimer = setTimeout(() => {
+        if (paramMode === 'watson') recalcWatson();
+    }, 300);
+}
+
+// Panel kontrol + tabel perbandingan Mesin Anchor Watson (Menu 2, mode watson)
+function buildWatsonPanelHTML() {
+    const wc = params.watsonConfig || { ...DEFAULT_WATSON_CONFIG };
+    const res = watsonResult;
+    const isRasio = wc.ceilingMethod === 'rasio';
+
+    // Info line: target dihitung ulang lokal mengikuti metode plafon
+    const targetPct = isRasio
+        ? Number(wc.rhoValue) * (wc.d1Pin + getLoading('D1')) - getLoading('D6')
+        : Number(wc.manualTargetPct);
+    const epsTxt    = (res && res.epsilon != null && isFinite(res.epsilon)) ? res.epsilon.toFixed(3) : '—';
+    const landedTxt = (res && res.landedD6 != null) ? Number(res.landedD6).toFixed(1) + '%' : '—';
+    const targetTxt = isFinite(targetPct) ? targetPct.toFixed(1) + '%' : '—';
+
+    // Tabel perbandingan Watson vs Manual + Δ berkode warna
+    const rowCodes = ['D1', 'D2', 'D3-1', 'D4-1', 'D5', 'D6', 'D3-2', 'D4-2'];
+    const rows = rowCodes.map(code => {
+        const jName = JENJANG_LIST.find(j => j.code === code)?.name || code;
+        const jv = calcJV(jvScores[code] || DEFAULT_SCORES[code] || {});
+        const wa = (res && res.anchors) ? res.anchors[code] : null;
+        const ma = params.manualAnchors ? params.manualAnchors[code] : null;
+
+        let dHtml = '<span class="text-slate-400">-</span>';
+        if (wa != null && ma != null) {
+            let d = wa - Number(ma);
+            if (Math.abs(d) < 0.05) d = 0;
+            // hijau |Δ|<1 · kuning 1–5 · merah >5
+            const cls = Math.abs(d) < 1 ? 'text-emerald-600'
+                      : (Math.abs(d) <= 5 ? 'text-amber-600' : 'text-red-600');
+            dHtml = `<span class="font-bold ${cls}">${d > 0 ? '+' : ''}${d.toFixed(1)}</span>`;
+        }
+        return `
+            <tr class="border-b border-slate-100 hover:bg-slate-50">
+                <td class="py-1.5 px-2 text-xs font-semibold text-slate-800">${jName}</td>
+                <td class="py-1.5 px-2 text-xs text-center text-slate-600">${jv}</td>
+                <td class="py-1.5 px-2 text-xs text-center font-bold text-blue-700">${wa != null ? wa.toFixed(1) : '-'}</td>
+                <td class="py-1.5 px-2 text-xs text-center text-slate-600">${ma != null ? Number(ma).toFixed(1) : '-'}</td>
+                <td class="py-1.5 px-2 text-xs text-center">${dHtml}</td>
+            </tr>`;
+    }).join('');
+
+    const warnItems = (res && res.warnings && res.warnings.length)
+        ? res.warnings.map(w => `<li>${w}</li>`).join('')
+        : '<li>Tidak ada warning.</li>';
+
+    return `
+        <div class="card border-blue-300">
+            <div class="card-title"><span>🧮</span> Mesin Anchor Watson</div>
+            <div class="card-desc">
+                Mode <strong>Watson-Driven</strong>: anchor D1&ndash;D6 dihitung otomatis dari Job Value (Menu 1)
+                memakai rantai growth ber-koridor dengan epsilon terkalibrasi ke plafon D6.
+                Sub-Level Multipliers &amp; parameter lain tetap manual.
+            </div>
+
+            <!-- Knobs -->
+            <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3 items-end mb-4">
+                <div>
+                    <label class="block text-xs font-semibold text-slate-500 mb-1">Pin D1 (%)</label>
+                    <input type="number" id="w-pin" class="input-field" value="${wc.d1Pin}" step="1"
+                        onchange="onWatsonKnobChange('d1Pin', this.value, 'num')">
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-slate-500 mb-1">Metode Plafon</label>
+                    <select id="w-ceiling" class="select-field" onchange="onWatsonKnobChange('ceilingMethod', this.value, 'str')">
+                        <option value="rasio" ${isRasio ? 'selected' : ''}>Rasio ke entry (&rho;)</option>
+                        <option value="manual" ${isRasio ? '' : 'selected'}>Target manual (%)</option>
+                    </select>
+                </div>
+                ${isRasio ? `
+                <div>
+                    <label class="block text-xs font-semibold text-slate-500 mb-1">&rho; (Rasio ke entry)</label>
+                    <input type="number" id="w-rho" class="input-field" value="${wc.rhoValue}" step="0.01"
+                        onchange="onWatsonKnobChange('rhoValue', this.value, 'num')">
+                </div>` : `
+                <div>
+                    <label class="block text-xs font-semibold text-slate-500 mb-1">Target D6 (%)</label>
+                    <input type="number" id="w-targetpct" class="input-field" value="${wc.manualTargetPct}" step="1"
+                        onchange="onWatsonKnobChange('manualTargetPct', this.value, 'num')">
+                </div>`}
+                <div>
+                    <label class="block text-xs font-semibold text-slate-500 mb-1">Koridor Min (%)</label>
+                    <input type="number" id="w-cmin" class="input-field" value="${wc.corridorMin}" step="1"
+                        onchange="onWatsonKnobChange('corridorMin', this.value, 'num')">
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-slate-500 mb-1">Koridor Max (%)</label>
+                    <input type="number" id="w-cmax" class="input-field" value="${wc.corridorMax}" step="1"
+                        onchange="onWatsonKnobChange('corridorMax', this.value, 'num')">
+                </div>
+                <div class="flex items-center gap-2 pb-2">
+                    <input type="checkbox" id="w-eps-auto" ${wc.epsilonAuto ? 'checked' : ''}
+                        onchange="onWatsonKnobChange('epsilonAuto', this.checked, 'bool')">
+                    <label for="w-eps-auto" class="text-xs font-semibold text-slate-500 cursor-pointer">&epsilon; auto</label>
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-slate-500 mb-1">&epsilon; Manual</label>
+                    <input type="number" id="w-eps" class="input-field ${wc.epsilonAuto ? 'bg-slate-100' : ''}"
+                        value="${wc.manualEpsilon}" step="0.001" ${wc.epsilonAuto ? 'disabled' : ''}
+                        onchange="onWatsonKnobChange('manualEpsilon', this.value, 'num')">
+                </div>
+            </div>
+
+            <div class="mb-4">
+                <button onclick="recalcWatson(true)" class="btn-secondary">Hitung Ulang Sekarang</button>
+            </div>
+
+            <!-- Info line -->
+            <div class="text-xs text-slate-600 bg-blue-50 border border-blue-100 rounded p-2 mb-4">
+                &epsilon; = ${epsTxt} &middot; Landed D6 = ${landedTxt} &middot; Target = ${targetTxt}
+            </div>
+
+            <!-- Tabel perbandingan -->
+            <div class="overflow-x-auto mb-4">
+                <table class="w-full text-left border-collapse">
+                    <thead>
+                        <tr class="border-b-2 border-slate-200 text-xs font-semibold uppercase tracking-wider text-slate-500">
+                            <th class="py-2 px-2">Jenjang</th>
+                            <th class="py-2 px-2 text-center">JV</th>
+                            <th class="py-2 px-2 text-center">Anchor Watson</th>
+                            <th class="py-2 px-2 text-center">Anchor Manual</th>
+                            <th class="py-2 px-2 text-center">&Delta; (Watson &minus; Manual)</th>
+                        </tr>
+                    </thead>
+                    <tbody>${rows}</tbody>
+                </table>
+            </div>
+
+            <!-- Warnings -->
+            <ul class="bg-amber-50 border border-amber-200 text-amber-800 text-xs rounded p-2 list-disc pl-5 space-y-0.5">
+                ${warnItems}
+            </ul>
+        </div>`;
+}
+
 function saveParamsSilent() {
-    // Read all anchor values
+    // Read all anchor values → SELALU ke snapshot manual (tidak pernah menimpa hasil Watson)
     Object.keys(params.anchors).forEach(k => {
         const el = document.getElementById('p-anchor-' + k);
-        if (el) params.anchors[k] = Number(el.value) || params.anchors[k];
+        if (el && params.manualAnchors) params.manualAnchors[k] = Number(el.value) || params.manualAnchors[k];
     });
+    // Mode manual: anchor aktif disinkronkan dari snapshot manual
+    if (paramMode === 'manual' && params.manualAnchors) {
+        Object.assign(params.anchors, params.manualAnchors);
+    }
 
     // Read all multiplier values
     Object.keys(params.subLevelMultipliers).forEach(k => {
@@ -475,6 +726,16 @@ function saveParams() {
 function resetParams() {
     if (!confirm('Reset semua parameter ke default?')) return;
     params = JSON.parse(JSON.stringify(DEFAULT_PARAMS));
+    params.manualAnchors = { ...params.anchors }; // snapshot manual ikut ke default
+    paramMode = 'manual';
+    watsonResult = null;
+    localStorage.setItem('payroll_sim_parammode', 'manual');
+    const bM = document.getElementById('btn-param-manual');
+    const bW = document.getElementById('btn-param-watson');
+    if (bM && bW) {
+        bM.classList.add('active');
+        bW.classList.remove('active');
+    }
     selectedUMK = 'Kota Surabaya';
     renderMenu2();
     // Re-render menu3 if visible
@@ -553,7 +814,7 @@ function renderMenu3() {
                                     <td class="py-1.5 px-2 border border-slate-300 text-center text-xs text-amber-800 bg-amber-50/30 font-bold">${formatCurrency(r.tt)}</td>
                                     <td class="py-1.5 px-2 border border-slate-300 text-center text-xs text-orange-800 bg-orange-50/30">${formatCurrency(r.ttt)}</td>
                                     <td class="py-1.5 px-2 border border-slate-300 text-center">
-                                        ${check75Rule(r.gapok, r.tt, r.thp) ? '<span class="badge-pass">&#10003; PASS</span>' : '<span class="badge-fail">&#10007; FAIL</span>'}
+                                        ${(() => { const ratio = calc75Ratio(r.gapok, r.tt); return `<span class="font-bold ${ratio >= 75 ? 'text-emerald-600' : 'text-red-600'}">${ratio.toFixed(1)}%</span>`; })()}
                                     </td>
                                 </tr>
                             `).join('')}
@@ -567,11 +828,11 @@ function renderMenu3() {
 function exportSimCSV() {
     const umkValue = UMK_DATA[selectedUMK] || 3000000;
     const tableData = generateSpreadTableData(umkValue, params, jvScores);
-    const headers = ['Jenjang', 'Sub-Level', 'Pos', 'Track', 'THP', 'Gapok', 'Tunj. Tetap', 'Tunj. Tidak Tetap', 'Check75'];
+    const headers = ['Jenjang', 'Sub-Level', 'Pos', 'Track', 'THP', 'Gapok', 'Tunj. Tetap', 'Tunj. Tidak Tetap', 'Check75%'];
     const rows = tableData.map(r => [
         r.jenjangName, r.subLevel, r.type, r.track,
         r.thp, r.gapok, r.tt, r.ttt,
-        check75Rule(r.gapok, r.tt, r.thp) ? 'PASS' : 'FAIL'
+        calc75Ratio(r.gapok, r.tt).toFixed(1) + '%'
     ]);
     const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
     downloadCSV(csv, `simulasi_gaji_${selectedUMK.replace(/\s/g, '_')}_${Date.now()}.csv`);
@@ -790,38 +1051,291 @@ function renderMenu6() {
     if (!container) return;
 
     const isLama = currentScheme === 'skema-lama';
+    const rk = v => Math.round(v / 1000) * 1000;
 
-    // Example values for demonstration
-    const exAnchor = 100;
-    const exMult = 1.07;
-    const exLoading = 38.4;
-    const exStep = 2;
-    const exCompGapok = 50;
-    const exCompTT = 15;
-    const exUMK = 5288796;
+    const demoJenjang = JENJANG_LIST.find(j => j.code === selectedJenjang) ? selectedJenjang : 'D3-1';
+    const demoJenjangObj = JENJANG_LIST.find(j => j.code === demoJenjang);
+    const demoSub = 'B';
+    const umkValue = UMK_DATA[selectedUMK] || 3000000;
+    const anchor   = params.anchors[demoJenjang] || 50;
+    const mult     = getMultiplier(demoSub, params);
+    const loading  = getLoading(demoJenjang);
+    const step     = params.step || 2;
+    const cg   = params.composition.gapok;
+    const ct   = params.composition.tt;
+    const cttt = params.composition.ttt;
+    const tsS  = params.ttSplit.struktural;
+    const tsL  = params.ttSplit.lamaKerja;
+    const tsK  = params.ttSplit.keluarga != null ? params.ttSplit.keluarga : 100 - tsS - tsL;
 
-    let exGapokMid, exTHPMid, exGapokCalc;
+    const thpPct = anchor * mult + loading;
+    const thpVal = rk(umkValue * thpPct / 100);
+
+    const gapokL = rk(thpVal * cg / 100);
+    const ttL    = rk(thpVal * ct / 100);
+    const tttL   = thpVal - gapokL - ttL;
+    const ttStruk  = rk(ttL * tsS / 100);
+    const ttLKerja = rk(ttL * tsL / 100);
+    const ttKel    = ttL - ttStruk - ttLKerja;
+
+    const thpA    = rk((anchor + loading) * umkValue / 100);
+    const gapokG  = rk(thpA * cg / 100);
+    const ngG     = thpVal - gapokG;
+    const ttNumG  = ct * mult;
+    const ttG     = rk(ngG * ttNumG / (ttNumG + cttt));
+    const tttG    = ngG - ttG;
+
+    const ratioL = (gapokL + ttL) > 0 ? gapokL / (gapokL + ttL) * 100 : 0;
+    const ratioG = (gapokG + ttG) > 0 ? gapokG / (gapokG + ttG) * 100 : 0;
+
+    const qBadge = '<span class="flow-q-badge">?</span>';
+    const arrow  = '<div class="flow-arrow">&#11015;</div>';
+    const stepCard = (badge, title, valueHtml, hint, id, cls) => `
+                <div class="flow-box flow-${cls} clickable" onclick="openFlowDetail('${id}')">
+                    <div class="text-[10px] text-slate-400 uppercase tracking-wider mb-1">${badge}</div>
+                    <div class="font-bold text-sm">${title}</div>
+                    ${valueHtml}
+                    ${hint ? `<div class="text-[10px] text-slate-500 mt-1">${hint}</div>` : ''}
+                    ${qBadge}
+                </div>`;
+
+    const stepsInput = [
+        stepCard('STEP 1 &middot; INPUT', 'Cari UMK lokasi', `<div class="text-lg font-extrabold text-blue-600">${formatCurrency(umkValue)}</div>`, selectedUMK, 'umk', 'input'),
+        stepCard('STEP 2 &middot; INPUT', `Anchor % jenjang ${demoJenjang}`, `<div class="text-lg font-extrabold text-emerald-600">${anchor}%</div>`, 'Menu 2 &rarr; Anchor % per Jenjang', 'anchor', 'input'),
+        stepCard('STEP 3 &middot; INPUT', `Multiplier sub-level ${demoSub}`, `<div class="text-lg font-extrabold text-purple-600">&times; ${mult.toFixed(2)}</div>`, 'Menu 2 &rarr; Sub-Level Multipliers', 'mult', 'input'),
+        stepCard('STEP 4 &middot; INPUT', 'Loading jenjang (LOCKED)', `<div class="text-lg font-extrabold text-amber-600">+ ${loading}%</div>`, 'Nilai tetap, tidak bisa diubah', 'loading', 'input')
+    ];
+
+    let flowHTML;
     if (isLama) {
-        exGapokMid = exAnchor * exMult;
-        exTHPMid = exGapokMid + exLoading;
-        exGapokCalc = `THP × ${exCompGapok}%`;
+        flowHTML = [
+            ...stepsInput,
+            stepCard('STEP 5 &middot; HITUNG', 'THP Mid %', `<div class="text-base font-extrabold text-blue-600">${anchor}% &times; ${mult.toFixed(2)} + ${loading}% = ${thpPct.toFixed(1)}%</div>`, '', 'thp-pct', 'calc'),
+            stepCard('STEP 6 &middot; HASIL', 'THP Rupiah (Mid)', `<div class="text-lg font-extrabold text-blue-700">${formatCurrency(thpVal)}</div>`, `Min / Max = Mid &minus; / + ${step}%`, 'thp-rp', 'output'),
+            stepCard('STEP 7 &middot; HITUNG', 'Bagi komponen dari THP (Composition Matrix)', `
+                        <div class="flex flex-col gap-0.5 mt-1 text-xs font-bold">
+                            <span class="text-emerald-600">Gapok = THP &times; ${cg}% = ${formatCurrency(gapokL)}</span>
+                            <span class="text-amber-600">TT = THP &times; ${ct}% = ${formatCurrency(ttL)}</span>
+                            <span class="text-orange-600">TTT = THP &minus; Gapok &minus; TT = ${formatCurrency(tttL)}</span>
+                        </div>`, '', 'comp-lama', 'process'),
+            stepCard('STEP 8 &middot; DETAIL', 'Rincian Tunjangan Tetap', `
+                        <div class="flex flex-col gap-0.5 mt-1 text-xs font-bold">
+                            <span class="text-amber-600">Struktural = TT &times; ${tsS}% = ${formatCurrency(ttStruk)}</span>
+                            <span class="text-amber-600">Lama Kerja = TT &times; ${tsL}% = ${formatCurrency(ttLKerja)}</span>
+                            <span class="text-amber-600">Keluarga = sisa = ${formatCurrency(ttKel)}</span>
+                        </div>`, '', 'tt-detail-lama', 'process'),
+            stepCard('STEP 9 &middot; VALIDASI', 'Cek Aturan 75%', `<div class="text-lg font-extrabold ${ratioL >= 75 ? 'text-emerald-600' : 'text-red-600'}">${ratioL.toFixed(1)}%</div>`, 'Gapok &divide; (Gapok + TT) harus &ge; 75%', 'check75', 'output')
+        ].join(arrow);
     } else {
-        exGapokMid = exAnchor;
-        exTHPMid = exAnchor * exMult + exLoading;
-        exGapokCalc = `Anchor × ${exCompGapok}%`;
+        flowHTML = [
+            ...stepsInput,
+            stepCard('STEP 5 &middot; HITUNG', 'THP Mid %', `<div class="text-base font-extrabold text-blue-600">${anchor}% &times; ${mult.toFixed(2)} + ${loading}% = ${thpPct.toFixed(1)}%</div>`, '', 'thp-pct', 'calc'),
+            stepCard('STEP 6 &middot; HASIL', 'THP Rupiah (Mid)', `<div class="text-lg font-extrabold text-blue-700">${formatCurrency(thpVal)}</div>`, `Min / Max = Mid &minus; / + ${step}% &middot; berbeda per sub-level`, 'thp-rp', 'output'),
+            stepCard('STEP 7 &middot; HITUNG', 'THP terendah — Sub-Level A', `<div class="text-base font-extrabold text-slate-700">(${anchor}% + ${loading}%) &times; UMK = ${formatCurrency(thpA)}</div>`, 'Setara Mult A = 1.00, tanpa pembagian spread', 'thp-a', 'calc'),
+            stepCard('STEP 8 &middot; HASIL', 'Gapok SERAGAM per jenjang', `<div class="text-lg font-extrabold text-emerald-700">${formatCurrency(gapokG)}</div>`, `= THP_A &times; comp.gapok% (${cg}%) — sama untuk A&ndash;E`, 'gapok-fixed', 'output'),
+            stepCard('STEP 9 &middot; HITUNG', 'NonGapok & TT proporsional', `
+                        <div class="flex flex-col gap-0.5 mt-1 text-xs font-bold">
+                            <span class="text-slate-600">NonGapok = THP &minus; Gapok = ${formatCurrency(ngG)}</span>
+                            <span class="text-amber-600">TT = NG &times; (${ct}&times;${mult.toFixed(2)}) / ((${ct}&times;${mult.toFixed(2)})+${cttt}) = ${formatCurrency(ttG)}</span>
+                        </div>`, 'Berbeda per sub-level (karena Multiplier)', 'nongapok-tt', 'process'),
+            stepCard('STEP 10 &middot; HASIL', 'Tunjangan Tidak Tetap', `<div class="text-lg font-extrabold text-orange-700">${formatCurrency(tttG)}</div>`, '= THP &minus; Gapok &minus; TT &middot; rincian TT = slot anggaran', 'ttt-residual', 'output'),
+            stepCard('STEP 11 &middot; VALIDASI', 'Cek Aturan 75%', `<div class="text-lg font-extrabold ${ratioG >= 75 ? 'text-emerald-600' : 'text-red-600'}">${ratioG.toFixed(1)}%</div>`, 'Gapok &divide; (Gapok + TT) harus &ge; 75%', 'check75', 'output')
+        ].join(arrow);
     }
 
-    const exGapokVal = Math.round((exUMK * (isLama ? exGapokMid : exAnchor * exCompGapok / 100) / 100) / 1000) * 1000;
-    const exTHPVal = Math.round((exUMK * exTHPMid / 100) / 1000) * 1000;
-    const exTTVal = Math.round((exTHPVal * exCompTT / 100) / 1000) * 1000;
-    const exTTTVal = exTHPVal - exGapokVal - exTTVal;
+    const rumusSections = [
+        { title: 'Rumus Dasar — berlaku kedua skema', rows: [
+            ['jv', 'Job Value', 'JV = K&times;15 + E&times;10 + S&times;12 + D&times;15 + C&times;10 + I&times;8 + X&times;8 + V&times;8 + N&times;5 + R&times;9'],
+            ['mult', 'Multiplier Sub-Level', 'A=1.00 &middot; B=1.07 &middot; C=1.15 &middot; D=1.22 &middot; E=1.29'],
+            ['loading', 'Loading per Jenjang (LOCKED)', 'D1=10% &middot; D2=24.2% &middot; D3=38.4% &middot; D4=52.6% &middot; D5=66.8% &middot; D6=81%'],
+            ['spread', 'Spread Min / Mid / Max', 'Min = Mid &minus; Step &nbsp;&middot;&nbsp; Max = Mid + Step'],
+            ['rounding', 'Pembulatan Rupiah', 'Semua nilai Rp dibulatkan ke kelipatan 1.000']
+        ]},
+        { title: 'Skema Lama', scheme: 'lama', rows: [
+            ['thp-pct', 'THP Mid %', 'THP% = Anchor &times; Mult + Loading'],
+            ['thp-rp', 'THP Rupiah', 'THP(Rp) = round1000( THP% &times; UMK &divide; 100 )'],
+            ['comp-lama', 'Komposisi Komponen', 'Gapok = THP&times;cG% &nbsp;&middot;&nbsp; TT = THP&times;cT% &nbsp;&middot;&nbsp; TTT = THP &minus; Gapok &minus; TT'],
+            ['tt-detail-lama', 'Rincian Tunjangan Tetap', 'Struktural = TT&times;s% &nbsp;&middot;&nbsp; Lama Kerja = TT&times;l% &nbsp;&middot;&nbsp; Keluarga = sisa']
+        ]},
+        { title: 'Skema Gaji Pokok', scheme: 'gp', rows: [
+            ['thp-a', 'THP Terendah (Sub A)', 'THP_A = round1000( (Anchor + Loading) &times; UMK &divide; 100 )'],
+            ['gapok-fixed', 'Gapok Seragam per Jenjang', 'Gapok = round1000( THP_A &times; comp.gapok% )'],
+            ['nongapok-tt', 'Tunjangan Tetap Proporsional', 'TT = NonGapok &times; (cT&times;M) &divide; ( (cT&times;M) + cTTT )'],
+            ['ttt-residual', 'Tunjangan Tidak Tetap', 'TTT = THP &minus; Gapok &minus; TT']
+        ]},
+        { title: 'Validasi', rows: [
+            ['check75', 'Aturan 75%', 'Gapok &divide; ( Gapok + TT ) &ge; 75%']
+        ]}
+    ];
+
+    const rumusHTML = rumusSections.map(sec => `
+                <div class="mt-3 first:mt-0">
+                    <div class="flex items-center gap-2 mb-1">
+                        <span class="text-xs font-extrabold uppercase tracking-wider text-slate-700">${sec.title}</span>
+                        ${sec.scheme ? `<span class="text-[9px] font-bold px-1.5 py-0.5 rounded-full ${(sec.scheme === 'lama') === isLama ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-400'}">${(sec.scheme === 'lama') === isLama ? 'SKEMA AKTIF' : 'skema lain'}</span>` : ''}
+                    </div>
+                    ${sec.rows.map(r => `
+                    <div class="formula-row" onclick="openFlowDetail('${r[0]}')">
+                        <span class="font-bold text-slate-600 text-[11px] uppercase tracking-wide">${r[1]}</span>
+                        <span class="text-slate-800">${r[2]}</span>
+                    </div>`).join('')}
+                </div>`).join('');
+
+    flowDetailsCache = {
+        umk: {
+            kind: 'INPUT', title: 'UMK Lokasi',
+            purpose: 'Titik awal seluruh perhitungan: nilai upah minimum regional yang menjadi dasar konversi semua persentase ke Rupiah.',
+            inputs: [{ name: `Pilihan lokasi UMK (${selectedUMK})`, src: 'MENU 2' }],
+            formulas: ['Output akhir (Rp) = Persentase × UMK ÷ 100'],
+            example: [`UMK ${selectedUMK} = ${formatCurrency(umkValue)}`, 'Angka ini dipakai sebagai pengali di seluruh langkah berikutnya.'],
+            notes: ['39 lokasi Jawa Timur tersedia di dropdown Menu 2.', 'Mengganti lokasi langsung mengubah semua nominal Rupiah di simulasi.']
+        },
+        anchor: {
+            kind: 'INPUT', title: `Anchor % — ${demoJenjangObj.name}`,
+            purpose: 'Persentase dasar yang menentukan posisi relatif jenjang pada struktur gaji dibanding jenjang lain.',
+            inputs: [{ name: `Anchor ${demoJenjang}`, src: 'MENU 2' }],
+            formulas: [`Anchor(${demoJenjang}) = ${anchor}%`],
+            example: [`Rentang antar jenjang: 50% (D1) s.d. 140% (D6).`, `Anchor ${demoJenjang} saat ini = ${anchor}%.`],
+            notes: ['Diatur per jenjang di Menu 2.', 'Skema Gaji Pokok: anchor juga menentukan Gapok (via THP_A).']
+        },
+        mult: {
+            kind: 'INPUT', title: 'Multiplier Sub-Level',
+            purpose: 'Pengali progression di dalam satu jenjang untuk membedakan sub-level A sampai E.',
+            inputs: [{ name: 'Sub-Level Multipliers A–E', src: 'MENU 2' }],
+            formulas: [`Mult(${demoSub}) = ${mult.toFixed(2)}`, 'Default: A=1.00, B=1.07, C=1.15, D=1.22, E=1.29'],
+            example: [`Demo memakai sub-level ${demoSub} dengan multiplier ${mult.toFixed(2)}.`],
+            notes: ['Skema Lama: multiplier mempengaruhi Gapok.', 'Skema Gaji Pokok: multiplier mempengaruhi THP dan porsi TT.']
+        },
+        loading: {
+            kind: 'INPUT', title: 'Loading Jenjang (LOCKED)',
+            purpose: 'Tambahan persentase tetap pada THP per jenjang, di atas hasil Anchor × Multiplier.',
+            inputs: [{ name: 'Loading per jenjang', src: 'LOCKED' }],
+            formulas: ['D1=10% · D2=24.2% · D3=38.4%', 'D4=52.6% · D5=66.8% · D6=81%'],
+            example: [`Loading ${demoJenjang} saat ini = ${loading}%.`],
+            notes: ['Nilai terkunci (Formula 3) dan tidak dapat diubah dari UI — hard-coded di data.js.']
+        },
+        'thp-pct': {
+            kind: isLama ? 'STEP 5 · HITUNG' : 'STEP 5 · HITUNG', title: 'THP Mid %',
+            purpose: 'Menggabungkan tiga parameter (Anchor, Multiplier, Loading) menjadi satu persentase THP posisi tengah.',
+            inputs: [
+                { name: `Anchor ${demoJenjang} = ${anchor}%`, src: 'MENU 2' },
+                { name: `Mult ${demoSub} = ${mult.toFixed(2)}`, src: 'MENU 2' },
+                { name: `Loading = ${loading}%`, src: 'LOCKED' }
+            ],
+            formulas: ['THP% = Anchor × Mult + Loading'],
+            example: [`${anchor}% × ${mult.toFixed(2)} + ${loading}% = ${thpPct.toFixed(1)}%`],
+            notes: ['Inilah angka "Mid %" pada kolom THP tabel Spread.']
+        },
+        'thp-rp': {
+            kind: 'HASIL', title: 'THP Rupiah',
+            purpose: 'Mengonversi persentase THP menjadi nominal uang berdasarkan UMK lokasi.',
+            inputs: [{ name: `Step (spread) = ${step}%`, src: 'MENU 2' }],
+            formulas: ['THP(Rp)   = round1000( THP% × UMK ÷ 100 )', 'Min(Rp)   = round1000( (THP% − Step) × UMK ÷ 100 )', 'Max(Rp)   = round1000( (THP% + Step) × UMK ÷ 100 )'],
+            example: [`THP Mid = ${thpPct.toFixed(1)}% × ${formatCurrency(umkValue)} ÷ 100 = ${formatCurrency(thpVal)}.`, `Spread ± ${step}% di sekitar Mid untuk Min/Max.`],
+            notes: [isLama
+                ? 'Skema Lama: spread berlaku juga pada Gapok (Min/Mid/Max).'
+                : 'Skema Gaji Pokok: spread hanya pada THP; Gapok tidak ikut spread.',
+                'Hasil inilah kolom THP di Menu 3 & Spread Table.']
+        },
+        'comp-lama': {
+            kind: 'SKEMA LAMA · HITUNG', title: 'Composition Matrix — Bagi Komponen dari THP',
+            purpose: 'Memecah THP menjadi tiga komponen gaji sesuai proporsi yang diatur user.',
+            inputs: [
+                { name: `comp.gapok = ${cg}%`, src: 'MENU 2' },
+                { name: `comp.tt = ${ct}%`, src: 'MENU 2' },
+                { name: `comp.ttt = ${cttt}%`, src: 'MENU 2' }
+            ],
+            formulas: ['Gapok = round1000( THP × cG% )', 'TT    = round1000( THP × cT% )', 'TTT   = THP − Gapok − TT'],
+            example: [`Gapok = ${formatCurrency(gapokL)}`, `TT    = ${formatCurrency(ttL)}`, `TTT   = ${formatCurrency(tttL)}`],
+            notes: ['Total cG + cT + cTTT harus 100%.', 'Mengubah komposisi tidak mengubah THP — hanya susunannya.']
+        },
+        'tt-detail-lama': {
+            kind: 'SKEMA LAMA · DETAIL', title: 'Rincian Tunjangan Tetap',
+            purpose: 'Membagi TT ke dalam tiga pos tunjangan sesuai TT Split Matrix.',
+            inputs: [
+                { name: `Struktural = ${tsS}%`, src: 'MENU 2' },
+                { name: `Lama Kerja = ${tsL}%`, src: 'MENU 2' }
+            ],
+            formulas: ['Struktural = round1000( TT × s% )', 'Lama Kerja = round1000( TT × l% )', 'Keluarga   = TT − Struktural − LamaKerja'],
+            example: [`Struktural = ${formatCurrency(ttStruk)}`, `Lama Kerja = ${formatCurrency(ttLKerja)}`, `Keluarga   = ${formatCurrency(ttKel)}`],
+            notes: ['Pos Keluarga dihitung sebagai sisa agar total TT tepat setelah pembulatan.']
+        },
+        'thp-a': {
+            kind: 'SKEMA GAJI POKOK · HITUNG', title: 'THP_A — THP Terendah',
+            purpose: 'Menghitung THP sub-level A (multiplier 1.00) sebagai patokan Gapok seragam satu jenjang.',
+            formulas: ['THP_A = round1000( (Anchor + Loading) × UMK ÷ 100 )', '(Setara THP sub-level A karena Mult A = 1.00)'],
+            example: [`(${anchor}% + ${loading}%) × ${formatCurrency(umkValue)} ÷ 100 = ${formatCurrency(thpA)}`],
+            notes: ['Disebut juga "THP Terendah" jenjang tersebut.']
+        },
+        'gapok-fixed': {
+            kind: 'SKEMA GAJI POKOK · HASIL', title: 'Gapok Seragam per Jenjang',
+            purpose: 'Menetapkan Gapok yang sama untuk seluruh sub-level A–E dalam satu jenjang.',
+            inputs: [{ name: `comp.gapok = ${cg}%`, src: 'MENU 2' }],
+            formulas: ['Gapok = round1000( THP_A × comp.gapok% )'],
+            example: [`Gapok = ${formatCurrency(thpA)} × ${cg}% = ${formatCurrency(gapokG)}`],
+            notes: ['MIN = MID = MAX — Gapok tidak mengikuti spread.', 'Keputusan BOD (Pak Andika): Gapok sama antar direktorat; diferensiasi antar direktorat lewat bonus/gaji ke-13, bukan gapok.']
+        },
+        'nongapok-tt': {
+            kind: 'SKEMA GAJI POKOK · HITUNG', title: 'NonGapok & TT Proporsional',
+            purpose: 'Menghitung sisa THP setelah Gapok, lalu membagi TT secara proporsional dengan pembobot Multiplier.',
+            inputs: [
+                { name: `comp.tt = ${ct}%`, src: 'MENU 2' },
+                { name: `comp.ttt = ${cttt}%`, src: 'MENU 2' }
+            ],
+            formulas: ['NonGapok = THP − Gapok', 'TT = NonGapok × (cT × M) ÷ ( (cT × M) + cTTT )'],
+            example: [`NonGapok = ${formatCurrency(thpVal)} − ${formatCurrency(gapokG)} = ${formatCurrency(ngG)}`, `TT = ${formatCurrency(ngG)} × (${ct}×${mult.toFixed(2)}) ÷ ((${ct}×${mult.toFixed(2)})+${cttt}) = ${formatCurrency(ttG)}`],
+            notes: ['Sub-level lebih tinggi → porsi TT membesar karena pembobot Multiplier.']
+        },
+        'ttt-residual': {
+            kind: 'SKEMA GAJI POKOK · HASIL', title: 'TTT Residual',
+            purpose: 'Menutup pembagian komponen: TTT adalah sisa THP setelah Gapok dan TT.',
+            formulas: ['TTT = THP − Gapok − TT'],
+            example: [`TTT = ${formatCurrency(thpVal)} − ${formatCurrency(gapokG)} − ${formatCurrency(ttG)} = ${formatCurrency(tttG)}`],
+            notes: ['Rincian TT (struktural/lama kerja/keluarga) bernilai 0 — hanya slot anggaran.']
+        },
+        check75: {
+            kind: 'VALIDASI', title: 'Aturan 75%',
+            purpose: 'Memastikan proporsi Gapok terhadap penghasilan tetap (Gapok + TT) memenuhi batas minimum perundangan.',
+            formulas: ['Rasio = Gapok ÷ (Gapok + TT) × 100%', 'Lulus jika Rasio ≥ 75%'],
+            example: [
+                `Skema Lama (demo): ${formatCurrency(gapokL)} ÷ (${formatCurrency(gapokL)} + ${formatCurrency(ttL)}) = ${ratioL.toFixed(1)}%`,
+                `Skema Gaji Pokok (demo): ${ratioG.toFixed(1)}%`
+            ],
+            notes: ['Ditampilkan sebagai angka di kolom Check 75% Menu 3: hijau ≥ 75%, merah < 75%.']
+        },
+        jv: {
+            kind: 'RUMUS', title: 'Job Value (Watson Wyatt)',
+            purpose: 'Skor evaluasi jabatan dari 10 faktor Watson Wyatt dengan bobot total 100.',
+            formulas: ['JV = K×15 + E×10 + S×12 + D×15 + C×10 + I×8 + X×8 + V×8 + N×5 + R×9'],
+            example: ['K=Pendidikan, E=Pengalaman, S=Ruang Lingkup, D=Tingkat Keputusan,', 'C=Konsekuensi Kesalahan, I/X=Kontak Int/Eksternal, V=Pengawasan,', 'N=Jml Karyawan Diawasi, R=Riset & Pengembangan.'],
+            notes: ['Skor faktor 1–5 diisi di Menu 1; range JV 100–500.', 'Dalam prototipe ini JV bersifat display (tidak mengubah nominal).']
+        },
+        spread: {
+            kind: 'RUMUS', title: 'Spread Min / Mid / Max',
+            purpose: 'Membuat rentang bayaran di sekitar nilai tengah agar ada ruang negosiasi/progression.',
+            inputs: [{ name: `Step = ${step}%`, src: 'MENU 2' }],
+            formulas: ['Mid = nilai dasar', 'Min = Mid − Step', 'Max = Mid + Step'],
+            example: [`Contoh: Mid ${thpPct.toFixed(1)}% → Min ${(thpPct - step).toFixed(1)}%, Max ${(thpPct + step).toFixed(1)}%.`],
+            notes: [isLama
+                ? 'Skema Lama: spread berlaku pada Gapok DAN THP.'
+                : 'Skema Gaji Pokok: spread hanya pada THP (Gapok seragam).']
+        },
+        rounding: {
+            kind: 'RUMUS', title: 'Pembulatan Rupiah',
+            purpose: 'Menjaga angka simulasi rapi dengan membulatkan semua nominal ke ribuan.',
+            formulas: ['round1000(x) = Math.round(x ÷ 1000) × 1000'],
+            example: ['Contoh: 4.998.760 → 4.999.000; 4.998.200 → 4.998.000.'],
+            notes: ['Diterapkan pada THP, Gapok, TT, dan TTT. Komponen residual (TTT/Keluarga) dihitung sebagai sisa agar totals tetap pas.']
+        }
+    };
 
     container.innerHTML = `
         <div class="card">
             <div class="card-title"><span>📖</span> Alur Perhitungan Formula</div>
             <div class="card-desc">
                 Diagram alur lengkap menunjukkan dari mana setiap angka berasal dan bagaimana satu sama lain terhubung.
-                Saat ini: <span class="font-bold text-blue-600">${isLama ? 'Skema Lama' : 'Skema Gaji Pokok'}</span>
+                Saat ini: <span class="font-bold text-blue-600">${isLama ? 'Skema Lama' : 'Skema Gaji Pokok'}</span>.
+                <span class="font-semibold text-slate-700">Klik kartu mana pun</span> untuk penjelasan lengkapnya.
             </div>
         </div>
 
@@ -829,147 +1343,28 @@ function renderMenu6() {
         <div class="card">
             <div class="card-title"><span>${isLama ? '📋' : '💰'}</span> ${isLama ? 'Skema Lama' : 'Skema Gaji Pokok'} — Alur Hitung</div>
             <div class="card-desc">
-                ${isLama 
-                    ? 'Gapok dihitung dari Anchor × Multiplier. THP = Gapok + Loading. Komposisi diambil dari THP.'
-                    : 'Gapok seragam per jenjang = Anchor × Composition%. THP = Anchor × Multiplier + Loading. TT & TTT diambil dari THP.'}
+                Angka di bawah adalah <span class="font-bold">nilai live</span> mengikuti parameter Anda saat ini —
+                Demo: <span class="font-semibold">${demoJenjangObj.name}</span>, Sub-Level <span class="font-semibold">${demoSub}</span>,
+                UMK <span class="font-semibold">${selectedUMK}</span>.
             </div>
 
-            <!-- Flowchart -->
             <div class="flex flex-col items-center gap-0 my-6">
-                <!-- Input Block -->
-                <div class="flow-box flow-input">
-                    <div class="text-[10px] text-slate-400 uppercase tracking-wider mb-1">INPUT</div>
-                    <div class="font-bold text-sm">UMK Lokasi</div>
-                    <div class="text-lg font-extrabold text-blue-600">${formatCurrency(exUMK)}</div>
-                </div>
-                <div class="flow-arrow">&#11015;</div>
+                ${flowHTML}
+            </div>
+        </div>
 
-                <!-- Anchor Block -->
-                <div class="flow-box flow-process">
-                    <div class="text-[10px] text-slate-400 uppercase tracking-wider mb-1">STEP 1 — Anchor %</div>
-                    <div class="font-bold text-sm">Persentase dasar Gapok per Jenjang</div>
-                    <div class="text-lg font-extrabold text-emerald-600">${exAnchor}%</div>
-                    <div class="text-[10px] text-slate-500 mt-1">Dari Menu 2 → Parameter</div>
-                </div>
-                <div class="flow-arrow">&#11015;</div>
+        <!-- FORMULA REFERENCE -->
+        <div class="card">
+            <div class="card-title"><span>📐</span> Kumpulan Rumus</div>
+            <div class="card-desc">Semua rumus yang dipakai simulator. Klik baris mana pun untuk penjelasan lengkap beserta contoh hitung live.</div>
+            ${rumusHTML}
+        </div>
 
-                ${isLama ? `
-                <!-- SKEMA LAMA PATH -->
-                <div class="flex gap-4 items-start">
-                    <div class="flex flex-col items-center">
-                        <div class="flow-box flow-process">
-                            <div class="text-[10px] text-slate-400 uppercase tracking-wider mb-1">STEP 2 — Multiplier</div>
-                            <div class="font-bold text-sm">Sub-Level ${selectedJenjang === 'D3-1' ? 'B' : 'A'}</div>
-                            <div class="text-lg font-extrabold text-purple-600">× ${exMult}</div>
-                        </div>
-                        <div class="flow-arrow">&#11015;</div>
-                        <div class="flow-box flow-calc">
-                            <div class="text-[10px] text-slate-400 uppercase tracking-wider mb-1">STEP 3 — Gapok Mid%</div>
-                            <div class="font-bold text-sm">Anchor × Multiplier</div>
-                            <div class="text-lg font-extrabold text-emerald-600">${exAnchor}% × ${exMult} = ${exGapokMid.toFixed(1)}%</div>
-                        </div>
-                        <div class="flow-arrow">&#11015;</div>
-                        <div class="flow-box flow-output">
-                            <div class="text-[10px] text-slate-400 uppercase tracking-wider mb-1">GAPOK (Rp)</div>
-                            <div class="font-bold text-sm">Gapok Mid% × UMK</div>
-                            <div class="text-lg font-extrabold text-emerald-700">${formatCurrency(exGapokVal)}</div>
-                        </div>
-                    </div>
-
-                    <div class="flex flex-col items-center">
-                        <div class="flow-box flow-process">
-                            <div class="text-[10px] text-slate-400 uppercase tracking-wider mb-1">STEP 2 — Loading</div>
-                            <div class="font-bold text-sm">Jenjang D3-1</div>
-                            <div class="text-lg font-extrabold text-amber-600">+ ${exLoading}%</div>
-                        </div>
-                        <div class="flow-arrow">&#11015;</div>
-                        <div class="flow-box flow-calc">
-                            <div class="text-[10px] text-slate-400 uppercase tracking-wider mb-1">STEP 3 — THP Mid%</div>
-                            <div class="font-bold text-sm">Gapok + Loading</div>
-                            <div class="text-lg font-extrabold text-blue-600">${exGapokMid.toFixed(1)}% + ${exLoading}% = ${exTHPMid.toFixed(1)}%</div>
-                        </div>
-                        <div class="flow-arrow">&#11015;</div>
-                        <div class="flow-box flow-output">
-                            <div class="text-[10px] text-slate-400 uppercase tracking-wider mb-1">THP (Rp)</div>
-                            <div class="font-bold text-sm">THP Mid% × UMK</div>
-                            <div class="text-lg font-extrabold text-blue-700">${formatCurrency(exTHPVal)}</div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="flow-arrow mt-2">&#11015;</div>
-                <div class="flow-box flow-process">
-                    <div class="text-[10px] text-slate-400 uppercase tracking-wider mb-1">STEP 4 — Composition Matrix</div>
-                    <div class="font-bold text-sm">THP × Persentase</div>
-                    <div class="flex gap-4 mt-2 text-sm">
-                        <span class="text-emerald-600 font-bold">Gapok = THP × ${exCompGapok}%</span>
-                        <span class="text-amber-600 font-bold">TT = THP × ${exCompTT}%</span>
-                        <span class="text-orange-600 font-bold">TTT = THP − Gapok − TT</span>
-                    </div>
-                </div>
-
-                ` : `
-                <!-- SKEMA GAJI POKOK PATH -->
-                <div class="flex gap-4 items-start">
-                    <div class="flex flex-col items-center">
-                        <div class="flow-box flow-process">
-                            <div class="text-[10px] text-slate-400 uppercase tracking-wider mb-1">STEP 2 — Composition</div>
-                            <div class="font-bold text-sm">Persentase Gapok</div>
-                            <div class="text-lg font-extrabold text-emerald-600">× ${exCompGapok}%</div>
-                        </div>
-                        <div class="flow-arrow">&#11015;</div>
-                        <div class="flow-box flow-calc">
-                            <div class="text-[10px] text-slate-400 uppercase tracking-wider mb-1">STEP 3 — Gapok %</div>
-                            <div class="font-bold text-sm">Anchor × Composition</div>
-                            <div class="text-lg font-extrabold text-emerald-600">${exAnchor}% × ${exCompGapok}% = ${(exAnchor * exCompGapok / 100).toFixed(1)}%</div>
-                        </div>
-                        <div class="flow-arrow">&#11015;</div>
-                        <div class="flow-box flow-output">
-                            <div class="text-[10px] text-slate-400 uppercase tracking-wider mb-1">GAPOK (Rp) — SERAGAM</div>
-                            <div class="font-bold text-sm">Gapok% × UMK</div>
-                            <div class="text-lg font-extrabold text-emerald-700">${formatCurrency(exGapokVal)}</div>
-                            <div class="text-[10px] text-emerald-500 mt-1">Sama untuk A/B/C/D/E</div>
-                        </div>
-                    </div>
-
-                    <div class="flex flex-col items-center">
-                        <div class="flow-box flow-process">
-                            <div class="text-[10px] text-slate-400 uppercase tracking-wider mb-1">STEP 2 — Multiplier</div>
-                            <div class="font-bold text-sm">Sub-Level B</div>
-                            <div class="text-lg font-extrabold text-purple-600">× ${exMult}</div>
-                        </div>
-                        <div class="flow-arrow">&#11015;</div>
-                        <div class="flow-box flow-process">
-                            <div class="text-[10px] text-slate-400 uppercase tracking-wider mb-1">STEP 2 — Loading</div>
-                            <div class="font-bold text-sm">Jenjang D3-1</div>
-                            <div class="text-lg font-extrabold text-amber-600">+ ${exLoading}%</div>
-                        </div>
-                        <div class="flow-arrow">&#11015;</div>
-                        <div class="flow-box flow-calc">
-                            <div class="text-[10px] text-slate-400 uppercase tracking-wider mb-1">STEP 3 — THP Mid%</div>
-                            <div class="font-bold text-sm">Anchor × Mult + Loading</div>
-                            <div class="text-lg font-extrabold text-blue-600">${exAnchor}% × ${exMult} + ${exLoading}% = ${exTHPMid.toFixed(1)}%</div>
-                        </div>
-                        <div class="flow-arrow">&#11015;</div>
-                        <div class="flow-box flow-output">
-                            <div class="text-[10px] text-slate-400 uppercase tracking-wider mb-1">THP (Rp) — VARIATIF</div>
-                            <div class="font-bold text-sm">THP Mid% × UMK</div>
-                            <div class="text-lg font-extrabold text-blue-700">${formatCurrency(exTHPVal)}</div>
-                            <div class="text-[10px] text-blue-500 mt-1">Berbeda per sub-level</div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="flow-arrow mt-2">&#11015;</div>
-                <div class="flow-box flow-process">
-                    <div class="text-[10px] text-slate-400 uppercase tracking-wider mb-1">STEP 4 — Komposisi dari THP</div>
-                    <div class="font-bold text-sm">THP × Persentase</div>
-                    <div class="flex gap-4 mt-2 text-sm">
-                        <span class="text-amber-600 font-bold">TT = THP × ${exCompTT}%</span>
-                        <span class="text-orange-600 font-bold">TTT = THP − Gapok − TT</span>
-                    </div>
-                </div>
-                `}
+        <!-- DETAIL MODAL -->
+        <div id="flow-modal" class="modal-overlay" style="display:none" onclick="closeFlowDetail()">
+            <div class="modal-box" onclick="event.stopPropagation()">
+                <button class="modal-close" onclick="closeFlowDetail()" aria-label="Tutup">&times;</button>
+                <div id="flow-modal-content"></div>
             </div>
         </div>
 
@@ -1061,6 +1456,61 @@ function renderMenu6() {
                 </table>
             </div>
         </div>
+    `;
+}
+
+// ---- Flow Detail Modal ----
+let flowDetailsCache = {};
+
+function openFlowDetail(id) {
+    const d = flowDetailsCache[id];
+    const contentEl = document.getElementById('flow-modal-content');
+    const modalEl = document.getElementById('flow-modal');
+    if (!d || !contentEl || !modalEl) return;
+    contentEl.innerHTML = renderFlowDetailContent(d);
+    modalEl.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+    document.addEventListener('keydown', flowEscHandler);
+}
+
+function closeFlowDetail() {
+    const modalEl = document.getElementById('flow-modal');
+    if (modalEl) modalEl.style.display = 'none';
+    document.body.style.overflow = '';
+    document.removeEventListener('keydown', flowEscHandler);
+}
+
+function flowEscHandler(e) {
+    if (e.key === 'Escape') closeFlowDetail();
+}
+
+function renderFlowDetailContent(d) {
+    return `
+        <div class="inline-block text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 mb-2">${d.kind}</div>
+        <h3 class="text-lg font-extrabold text-slate-900 mb-2">${d.title}</h3>
+        <p class="text-sm text-slate-600 mb-4">${d.purpose}</p>
+        ${d.inputs && d.inputs.length ? `
+        <div class="mb-4">
+            <div class="text-xs font-bold uppercase tracking-wider text-slate-500 mb-1.5">Input yang dibutuhkan</div>
+            <div class="flex flex-col gap-1">
+                ${d.inputs.map(i => `<div class="flex items-center justify-between gap-2 text-sm bg-slate-50 rounded-lg px-2.5 py-1.5 border border-slate-200"><span>${i.name}</span><span class="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded whitespace-nowrap ${i.src === 'LOCKED' ? 'bg-red-100 text-red-600' : 'bg-emerald-100 text-emerald-700'}">${i.src}</span></div>`).join('')}
+            </div>
+        </div>` : ''}
+        ${d.formulas && d.formulas.length ? `
+        <div class="mb-4">
+            <div class="text-xs font-bold uppercase tracking-wider text-slate-500 mb-1.5">Rumus</div>
+            <pre class="bg-slate-900 text-slate-100 rounded-lg p-3 text-xs overflow-x-auto leading-relaxed font-mono">${d.formulas.join('\n')}</pre>
+        </div>` : ''}
+        ${d.example && d.example.length ? `
+        <div class="mb-4">
+            <div class="text-xs font-bold uppercase tracking-wider text-slate-500 mb-1.5">Contoh hitung — parameter Anda saat ini</div>
+            <div class="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs font-mono leading-relaxed text-amber-900">${d.example.join('<br>')}</div>
+        </div>` : ''}
+        ${d.notes && d.notes.length ? `
+        <div>
+            <div class="text-xs font-bold uppercase tracking-wider text-slate-500 mb-1.5">Catatan</div>
+            <ul class="list-disc pl-5 text-sm text-slate-600 space-y-1">${d.notes.map(n => `<li>${n}</li>`).join('')}</ul>
+        </div>` : ''}
     `;
 }
 

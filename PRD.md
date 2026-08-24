@@ -1,6 +1,6 @@
 # PRD: Prototype Simulasi Payroll v2 (Watson Wyatt Based)
 
-**Version:** 1.0  
+**Version:** 1.2  
 **Date:** 2026-08-24  
 **Status:** APPROVED - Ready for Implementation  
 **Location:** `E:\ZenNotes\ALLProject\Payroll\simulation-v-saya\`
@@ -133,7 +133,7 @@ Loading per jenjang = Faktor Skala / 5 transisi / 100 = 14.20%
 | D5 | 66.80% | 10% + 4×14.20% |
 | D6 | 81.00% | 10% + 5×14.20% |
 
-### 2.4 Salary Calculation Flow
+### 2.4 Salary Calculation Flow (Skema Gaji Pokok - Updated)
 
 ```
 Step 1: Get Anchor % (from Menu 2, default 50%)
@@ -141,12 +141,20 @@ Step 2: Get Multiplier (from Formula 2, based on Sub-Level A-E)
 Step 3: Get Loading (from Formula 3, based on Jenjang D1-D6)
 Step 4: Effective % = (Anchor% × Multiplier) + Loading
 Step 5: THP = UMK × Effective%
-Step 6: Gapok = THP × Gapok%
-Step 7: TT (Tunjangan Tetap) = THP × TT%
-Step 8: TTT (Tunjangan Tidak Tetap) = THP × TTT%
+Step 6: Gapok = Anchor (FIXED per jenjang, tanpa Multiplier)
+Step 7: nonGapok = THP - Gapok
+Step 8: TT (Tunjangan Tetap) = nonGapok × (comp.tt × Multiplier) / (comp.tt × Multiplier + comp.ttt)
+Step 9: TTT (Tunjangan Tidak Tetap) = THP - Gapok - TT (residual)
 ```
 
-**Composition Validation:** Gapok% + TT% + TTT% MUST equal 100%
+**Composition Validation:**
+- `comp.gapok% + comp.tt% + comp.ttt%` MUST equal 100%
+- **Gapok**: Fixed per jenjang (Min = Mid = Max), tidak ada spread
+- **THP**: Ada spread (±step) per sub-level
+
+**Min/Mid/Max Behavior:**
+- **THP Min/Mid/Max**: THP bervariasi per sub-level dengan spread (±step)
+- **Gapok Min/Mid/Max**: Tidak ada spread, selalu sama dengan Anchor
 
 ---
 
@@ -222,18 +230,20 @@ Step 8: TTT (Tunjangan Tidak Tetap) = THP × TTT%
 | Stream Positioning | Multiplier for stream positioning | 1.03 | Number input (1.00-2.00) |
 
 **Tooltips:**
-- `% Gapok D1-A`: "Persentase komponen Gapok terhadap THP untuk level D1-A. Ini adalah anchor dari mana seluruh perhitungan berawal."
+- `% Gapok D1-A`: "Persentase Gapok terhadap UMK untuk level D1-A. Ini adalah anchor yang FIXED per jenjang (tidak ada Multiplier). Seluruh perhitungan THP dimulai dari anchor ini."
 - `THP Cap`: "Batas maksimum Take Home Pay yang bisa diterima karyawan. Jika perhitungan melebihi batas ini, THP akan di-cap."
 
 #### Section B: Composition Matrix
 
-| Komponen | Default % | Input |
-|----------|-----------|-------|
-| Gapok (Base Salary) | 50% | Number input |
-| TT (Tunjangan Tetap) | 15% | Number input |
-| TTT (Tunjangan Tidak Tetap) | 35% | Number input |
+| Komponen | Default % | Input | Keterangan |
+|----------|-----------|-------|------------|
+| Gapok (Base Salary) | 50% | Number input | % terhadap THP (untuk validasi) |
+| TT (Tunjangan Tetap) | 15% | Number input | % terhadap nonGapok (dikalikan Multiplier) |
+| TTT (Tunjangan Tidak Tetap) | 35% | Number input | % terhadap nonGapok (residual) |
 
 **Validation:** Sum MUST equal 100%. Show warning if not.
+
+**Note:** Composition digunakan untuk perhitungan TT dan TTT. Gapok bersifat FIXED per jenjang (tidak menggunakan composition langsung dalam perhitungan).
 
 #### Section C: UMK Selector
 
@@ -293,21 +303,30 @@ Kota Mojokerto, Kota Pasuruan, Kota Probolinggo
 | Multiplier | Sub-level multiplier | From Formula 2 |
 | Loading | Jenjang loading | From Formula 3 |
 | Effective % | Calculated effective rate | Anchor × Multiplier + Loading |
-| Gapok (Rp) | Base salary component | THP × Gapok% |
-| TT (Rp) | Fixed allowance | THP × TT% |
-| TTT (Rp) | Variable allowance | THP × TTT% |
+| Gapok (Rp) | Base salary component (FIXED per jenjang) | UMK × Anchor% |
+| TT (Rp) | Fixed allowance | nonGapok × (comp.tt × mult) / (comp.tt × mult + comp.ttt) |
+| TTT (Rp) | Variable allowance (residual) | THP - Gapok - TT |
 | THP (Rp) | Total take-home pay | UMK × Effective% |
 | Status | Validation status | Monotonic check, cap check |
 
-#### Calculation Per Row
+#### Calculation Per Row (Skema Gaji Pokok - Updated)
 
 ```javascript
 // For each row (jenjang × sub-level):
 effective = (anchorPercent × multiplier) + loadingPercent
 thp = umk × effective
-gapok = thp × gapokPercent
-tt = thp * ttPercent
-ttt = thp * tttPercent
+
+// Gapok: FIXED per jenjang, tanpa Multiplier
+gapok = umk × anchorPercent
+
+// nonGapok: komponen selain Gapok
+nonGapok = thp - gapok
+
+// TT: proporsional ke nonGapok dengan Multiplier
+tt = nonGapok * (composition.tt * multiplier) / (composition.tt * multiplier + composition.ttt)
+
+// TTT: residual (THP - Gapok - TT)
+ttt = thp - gapok - tt
 
 // Rounding: All amounts rounded to nearest 1000 (ribuan)
 thp = Math.round(thp / 1000) * 1000
@@ -412,14 +431,14 @@ const JENJANG_COUNT = 5;   // Transisi from D1 to D6
 
 ```javascript
 const DEFAULT_PARAMS = {
-    anchorPercent: 50,        // % Gapok D1-A
+    anchorPercent: 50,        // % Gapok (FIXED per jenjang, tanpa Multiplier)
     thpMaxPercent: null,      // % THP Max (null = no limit)
     thpCap: 15000000,         // Rp 15,000,000
     streamPositioning: 1.03,
     composition: {
-        gapok: 50,
-        tt: 15,
-        ttt: 35
+        gapok: 50,            // % Gapok terhadap THP (digunakan untuk validasi, bukan perhitungan langsung)
+        tt: 15,               // % TT terhadap nonGapok (dikalikan Multiplier)
+        ttt: 35               // % TTT terhadap nonGapok (residual)
     },
     dualTrack: {
         technical: 40,
@@ -618,19 +637,23 @@ const DEFAULT_SCORES = {
 2. If not equal, show red warning and disable simulation
 3. Highlight which component is off
 
+**Note:** Composition digunakan untuk validasi dan perhitungan TT/TTT. Gapok bersifat FIXED per jenjang (tidak menggunakan composition langsung dalam perhitungan).
+
 ### 6.4 THP Cap Override
 
 **When THP exceeds cap:**
 1. Calculate uncapped THP normally
 2. If `THP > Cap`, set `THP = Cap`
-3. Recalculate composition: `gapok = Cap × gapok%`
-4. Show "CAPPED" badge in Status column
+3. Gapok tetap FIXED: `gapok = UMK × anchorPercent` (tidak berubah)
+4. Recalculate TT dan TTT berdasarkan THP yang di-cap
+5. Show "CAPPED" badge in Status column
 
 ### 6.5 Monotonic Check
 
 **Validates:**
-- For each sub-level (A→E within jenjang): THP must increase
-- For each jenjang (D1→D6): Base THP (at same sub-level) must increase
+- For each sub-level (A→E within jenjang): THP must increase (karena Multiplier meningkat)
+- For each jenjang (D1→D6): THP must increase (karena Loading meningkat)
+- Gapok TIDAK diecek monotonic-nya karena FIXED per jenjang (Min = Mid = Max)
 
 **If violated:**
 - Show ❌ with specific violating row highlighted
@@ -751,7 +774,7 @@ const DEFAULT_SCORES = {
 - Loading (D3) = 38.40%
 - Composition: Gapok 50%, TT 15%, TTT 35%
 
-**Calculation:**
+**Calculation (Skema Gaji Pokok - Updated):**
 ```
 Effective % = (50% × 1.0725) + 38.40%
             = 53.625% + 38.40%
@@ -760,16 +783,57 @@ Effective % = (50% × 1.0725) + 38.40%
 THP = 3,200,000 × 92.025%
     = 2,944,800
 
-Gapok = 2,944,800 × 50%
-      = 1,472,400
+Gapok = Anchor = 50% (FIXED, tidak ada Multiplier)
+      = 1,600,000  (3,200,000 × 50%)
 
-TT = 2,944,800 × 15%
-   = 441,720
+nonGapok = THP - Gapok
+         = 2,944,800 - 1,600,000
+         = 1,344,800
 
-TTT = 2,944,800 × 35%
-    = 1,030,680
+TT = nonGapok × (comp.tt × Multiplier) / (comp.tt × Multiplier + comp.ttt)
+   = 1,344,800 × (15% × 1.0725) / (15% × 1.0725 + 35%)
+   = 1,344,800 × (0.160875) / (0.160875 + 0.35)
+   = 1,344,800 × 0.160875 / 0.510875
+   = 1,344,800 × 0.3149
+   = 423,500 (rounded to nearest 1000)
 
-Verification: 1,472,400 + 441,720 + 1,030,680 = 2,944,800 ✓
+TTT = THP - Gapok - TT
+    = 2,944,800 - 1,600,000 - 423,500
+    = 921,300
+
+Verification: 1,600,000 + 423,500 + 921,300 = 2,944,800 ✓
+```
+
+### Test Case: D3-1, Sub-Level A (Min) vs E (Max)
+
+**Given:**
+- Anchor = 100%
+- Composition: Gapok 50%, TT 15%, TTT 35%
+- Multiplier (A) = 1.00, Multiplier (E) = 1.29
+- Loading (D3) = 38.40%
+
+**Min (Sub-Level A):**
+```
+THP = Anchor × Multiplier + Loading = 100% × 1.00 + 38.40% = 138.40%
+Gapok = Anchor = 100% (FIXED)
+TT = (THP - Gapok) × (comp.tt × Multiplier) / (comp.tt × Multiplier + comp.ttt)
+   = 38.40% × (15% × 1.00) / (15% × 1.00 + 35%)
+   = 38.40% × 0.15 / 0.50
+   = 38.40% × 0.30
+   = 11.52%
+TTT = THP - Gapok - TT = 138.40% - 100% - 11.52% = 26.88%
+```
+
+**Max (Sub-Level E):**
+```
+THP = Anchor × Multiplier + Loading = 100% × 1.29 + 38.40% = 167.40%
+Gapok = Anchor = 100% (FIXED)
+TT = (THP - Gapok) × (comp.tt × Multiplier) / (comp.tt × Multiplier + comp.ttt)
+   = 67.40% × (15% × 1.29) / (15% × 1.29 + 35%)
+   = 67.40% × 0.1935 / 0.5435
+   = 67.40% × 0.356
+   = 24.0%
+TTT = THP - Gapok - TT = 167.40% - 100% - 24.0% = 43.4%
 ```
 
 ---
@@ -780,22 +844,25 @@ Verification: 1,472,400 + 441,720 + 1,030,680 = 2,944,800 ✓
 |---------|------|---------|
 | 1.0 | 2026-08-24 | Initial PRD approved |
 | 1.1 | 2026-08-24 | Updated simulation approach to Spread THP & Gapok format, split TT into 3 tunjangans, added Menu 5 |
+| 1.2 | 2026-08-24 | Updated Skema Gaji Pokok: THP = Anchor × Multiplier + Loading, Gapok = Anchor (FIXED), TT proporsional ke nonGapok dengan Multiplier, TTT residual |
 
 ---
 
 ## Appendix C: Spread & Tunjangan Update (v1.1)
 
 **1. Tunjangan Tetap Split**
-Tunjangan Tetap (15% dari THP) dipecah menjadi 3 sub-komponen (default bisa diubah di Parameter):
+Tunjangan Tetap (15% dari nonGapok) dipecah menjadi 3 sub-komponen (default bisa diubah di Parameter):
 - **Tunjangan Struktural** (Default 60% dari TT)
 - **Tunjangan Lama Kerja** (Default 25% dari TT)
 - **Tunjangan Keluarga** (Default 15% dari TT)
 
-**2. Simulation Format (Min/Mid/Max)**
-- Setiap sub-level memiliki rentang: Min, Mid, Max.
-- **Mid** dihitung menggunakan anchor jenjang + progression step.
-- **Min** = Mid - step.
-- **Max** = Mid + step.
+**2. Simulation Format (Min/Mid/Max) - Updated**
+- **THP**: Setiap sub-level memiliki rentang: Min, Mid, Max.
+  - **Mid** dihitung menggunakan anchor jenjang + progression step.
+  - **Min** = Mid - step.
+  - **Max** = Mid + step.
+- **Gapok**: TIDAK ada spread, selalu sama dengan Anchor (Min = Mid = Max)
+- **TT & TTT**: Dihitung berdasarkan THP dan Gapok yang sudah diketahui
 - Menampilkan compliance check: `(Gapok + TT) / THP >= 75%`.
 
 **3. Menu 5: Spread Table**

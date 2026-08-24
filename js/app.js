@@ -11,10 +11,30 @@ function loadFromStorage() {
         if (raw) {
             const saved = JSON.parse(raw);
             params = JSON.parse(JSON.stringify(DEFAULT_PARAMS));
+            // Snapshot anchor manual: migrasi build lama memakai anchor tersimpan user,
+            // build baru memakai anchor default (deep-safe)
+            if (saved.params && saved.params.anchors && !saved.params.manualAnchors) {
+                params.manualAnchors = { ...saved.params.anchors };
+            } else {
+                params.manualAnchors = { ...params.anchors };
+            }
             if (saved.params) {
                 for (const key in saved.params) {
+                    // manualAnchors tidak ada di DEFAULT_PARAMS — merge langsung agar snapshot persisten antar sesi
+                    if (key === 'manualAnchors' && typeof saved.params[key] === 'object' && saved.params[key] !== null) {
+                        params.manualAnchors = { ...params.manualAnchors, ...saved.params[key] };
+                        continue;
+                    }
                     if (typeof saved.params[key] === 'object' && saved.params[key] !== null && !Array.isArray(saved.params[key])) {
-                        params[key] = { ...(params[key] || {}), ...saved.params[key] };
+                        // Only merge keys that exist in DEFAULT_PARAMS
+                        const defaultKeys = DEFAULT_PARAMS[key] ? Object.keys(DEFAULT_PARAMS[key]) : [];
+                        const filtered = {};
+                        for (const k in saved.params[key]) {
+                            if (defaultKeys.includes(k)) {
+                                filtered[k] = saved.params[key][k];
+                            }
+                        }
+                        params[key] = { ...(params[key] || {}), ...filtered };
                     } else {
                         params[key] = saved.params[key];
                     }
@@ -31,6 +51,7 @@ function loadFromStorage() {
     }
     // Defaults
     params = JSON.parse(JSON.stringify(DEFAULT_PARAMS));
+    params.manualAnchors = { ...params.anchors };
     jvScores = {};
     Object.keys(DEFAULT_SCORES).forEach(k => { jvScores[k] = { ...DEFAULT_SCORES[k] }; });
     selectedUMK = 'Kota Surabaya';
@@ -57,6 +78,16 @@ function resetStorage() {
     if (!confirm('Reset semua pengaturan ke default?')) return;
     localStorage.removeItem(STORAGE_KEY);
     params = JSON.parse(JSON.stringify(DEFAULT_PARAMS));
+    params.manualAnchors = { ...params.anchors };
+    paramMode = 'manual';
+    watsonResult = null;
+    localStorage.setItem('payroll_sim_parammode', 'manual');
+    const bM = document.getElementById('btn-param-manual');
+    const bW = document.getElementById('btn-param-watson');
+    if (bM && bW) {
+        bM.classList.add('active');
+        bW.classList.remove('active');
+    }
     jvScores = {};
     Object.keys(DEFAULT_SCORES).forEach(k => { jvScores[k] = { ...DEFAULT_SCORES[k] }; });
     selectedUMK = 'Kota Surabaya';
@@ -112,6 +143,22 @@ document.addEventListener('DOMContentLoaded', () => {
     if (btnLama && btnGapok) {
         btnLama.classList.toggle('active', currentScheme === 'skema-lama');
         btnGapok.classList.toggle('active', currentScheme === 'skema-gapok');
+    }
+
+    // ---- Param mode (Manual vs Watson-Driven) ----
+    const savedParamMode = localStorage.getItem('payroll_sim_parammode');
+    paramMode = savedParamMode === 'watson' ? 'watson' : 'manual';
+    // Deep-safe: pastikan snapshot manual anchor selalu terbentuk
+    if (!params.manualAnchors || typeof params.manualAnchors !== 'object' || Object.keys(params.manualAnchors).length === 0) {
+        params.manualAnchors = { ...params.anchors };
+    }
+    // Pastikan anchor aktif konsisten dengan mode yang dipulihkan
+    syncActiveSources();
+    const btnParamManual = document.getElementById('btn-param-manual');
+    const btnParamWatson = document.getElementById('btn-param-watson');
+    if (btnParamManual && btnParamWatson) {
+        btnParamManual.classList.toggle('active', paramMode === 'manual');
+        btnParamWatson.classList.toggle('active', paramMode === 'watson');
     }
 
     // Show default menu

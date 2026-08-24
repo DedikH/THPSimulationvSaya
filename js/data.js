@@ -31,8 +31,36 @@ const JENJANG_LIST = [
     { code: 'D6',   name: 'D6 - Executive Management',   track: 'Managerial',  loading: 81.0 }
 ];
 
+// ---- Watson-Driven Anchor Engine: default knobs ----
+const DEFAULT_WATSON_CONFIG = {
+    d1Pin: 50,
+    ceilingMethod: 'rasio',
+    rhoValue: 3.68,
+    manualTargetPct: 140,
+    epsilonAuto: true,
+    manualEpsilon: 0.705,
+    corridorMin: 5,
+    corridorMax: 45,
+    managerialPremium: 1.03,
+    multTargetE: 1.29
+};
+
+// ---- Watson Sub-Level Deltas (Seed) ----
+const DEFAULT_SUB_DELTAS = {};
+JENJANG_LIST.forEach(j => {
+    DEFAULT_SUB_DELTAS[j.code] = {
+        B: { K: 1 },
+        C: { K: 1, E: 1 },
+        D: { K: 1, E: 1, S: 1 },
+        E: { K: 1, E: 1, S: 1, D: 1 }
+    };
+});
+
 // ---- Default Parameters ----
 const DEFAULT_PARAMS = {
+    // Knob mesin Watson (di-spread agar deep-merge localStorage lama aman)
+    watsonConfig: { ...DEFAULT_WATSON_CONFIG },
+    subLevelDeltas: JSON.parse(JSON.stringify(DEFAULT_SUB_DELTAS)),
     anchors: {
         D1: 50.0,
         D2: 75.0,

@@ -46,11 +46,12 @@ function calcSpread(umkValue, jenjangCode, subLevel, params) {
         gapokMid = anchor * mult;
         thpMid   = gapokMid + loading;
     } else {
-        // SKEMA GAJI POKOK: Gapok seragam, Multiplier apply ke THP
-        gapokMid = anchor;
-        thpMid   = anchor * mult + loading;
+        // SKEMA GAJI POKOK: THP varies per sub-level, Gapok tetap per jenjang
+        thpMid   = anchor * mult + loading;  // THP = Anchor × Multiplier + Loading
+        gapokMid = anchor;                    // Gapok = Anchor (tetap, tanpa Multiplier)
     }
 
+    // Spread: Skema Lama ada spread di Gapok & THP, Skema Gaji Pokok hanya di THP
     const gapokMin = currentScheme === 'skema-gapok' ? gapokMid : gapokMid - step;
     const gapokMax = currentScheme === 'skema-gapok' ? gapokMid : gapokMid + step;
     const thpMin   = thpMid - step;
@@ -71,24 +72,45 @@ function calcSpread(umkValue, jenjangCode, subLevel, params) {
 }
 
 // ---- Split THP into components via composition matrix ----
-// gapokFixed: optional, override gapok value (for skema gaji pokok)
-// anchorPct: optional, anchor percentage (for skema gaji pokok calculation)
-function calcComponents(thp, params, gapokFixed, anchorPct) {
+// gapokRupiah: pre-calculated gapok in Rupiah (from calcSpread, for skema gaji pokok)
+// mult: sub-level multiplier (A=1.00, B=1.07, etc.)
+// anchor: anchor percentage for the jenjang
+// loading: loading percentage for the jenjang
+// umkValue: UMK value for the location
+function calcComponents(thp, params, gapokRupiah, mult, anchor, loading, umkValue) {
     const rk = v => Math.round(v / 1000) * 1000;
 
-    let gapok;
-    if (currentScheme === 'skema-gapok' && anchorPct !== undefined) {
-        gapok = rk(anchorPct * params.composition.gapok / 100);  // Anchor × composition.gapok%
+    let gapok, tt, ttt;
+
+    if (currentScheme === 'skema-lama') {
+        // SKEMA LAMA: Semua proporsi dari THP × composition%
+        gapok = rk(thp * params.composition.gapok / 100);
+        tt    = rk(thp * params.composition.tt / 100);
+        ttt   = thp - gapok - tt;
     } else {
-        gapok = rk(thp * params.composition.gapok / 100);  // THP × composition.gapok% (skema lama)
+        // SKEMA GAJI POKOK: Gapok = THP_A (THP terendah) × composition.gapok% — FIXED seragam
+        const thpA = rk(((anchor || 0) + (loading || 0)) * (umkValue || 0) / 100);
+        gapok = rk(thpA * params.composition.gapok / 100);
+        const nonGapok = thp - gapok;
+        const m = mult || 1;
+        const ttNum = params.composition.tt * m;
+        const ttDen = ttNum + params.composition.ttt;
+        tt  = rk(nonGapok * ttNum / ttDen);
+        ttt = thp - gapok - tt;
     }
 
-    const tt    = rk(thp * params.composition.tt    / 100);
-    const ttt   = thp - gapok - tt;
-
-    const struktural = rk(tt * params.ttSplit.struktural / 100);
-    const lamaKerja  = rk(tt * params.ttSplit.lamaKerja  / 100);
-    const keluarga   = tt - struktural - lamaKerja;
+    let struktural, lamaKerja, keluarga;
+    if (currentScheme === 'skema-gapok') {
+        // SKEMA GAJI POKOK: Detail TT belum dihitung, hanya slot anggaran
+        struktural = 0;
+        lamaKerja  = 0;
+        keluarga   = 0;
+    } else {
+        // SKEMA LAMA: Detail TT dihitung normal
+        struktural = rk(tt * params.ttSplit.struktural / 100);
+        lamaKerja  = rk(tt * params.ttSplit.lamaKerja  / 100);
+        keluarga   = tt - struktural - lamaKerja;
+    }
 
     return { gapok, tt, ttt, struktural, lamaKerja, keluarga, thp };
 }
@@ -98,6 +120,115 @@ function check75Rule(gapok, tt, _thp) {
     const base = gapok + tt;
     if (base === 0) return true;
     return gapok / base >= 0.75;
+}
+
+// ---- Calculate 75% Rule ratio (Gapok / (Gapok + TT)) ----
+function calc75Ratio(gapok, tt) {
+    const base = gapok + tt;
+    if (base === 0) return 0;
+    return (gapok / base) * 100;
+}
+
+// =====================================================
+// WATSON-DRIVEN ANCHOR ENGINE (murni, tanpa DOM)
+// Menghitung anchor D1-D6 dari Job Value via rantai growth
+// ber-koridor: eps dikalibrasi agar D6 mendarat di target,
+// lalu growth per langkah dipangkas masuk koridor min/max.
+// =====================================================
+function calcWatsonAnchors(jvScores, cfg) {
+    const round01 = v => Math.round(v * 10) / 10;
+    const warnings = [];
+    const steps = [];
+
+    // Rantai jenjang utama (urut level; D3-2/D4-2 diturunkan terpisah via premium)
+    const CHAIN = ['D1', 'D2', 'D3-1', 'D4-1', 'D5', 'D6'];
+
+    // JV tiap kode: skor user jika ada, fallback skor default
+    const jvOf = (kode) => calcJV(
+        (jvScores && jvScores[kode]) ? jvScores[kode] : (DEFAULT_SCORES[kode] || {})
+    );
+
+    const jvD1   = jvOf('D1');
+    const jvD6   = jvOf('D6');
+    const d1Pin  = Number(cfg.d1Pin);
+
+    // Target plafon D6 (%)
+    let target;
+    if (cfg.ceilingMethod === 'rasio') {
+        // ρ × THP% entry (pin + loading D1) − loading D6
+        target = Number(cfg.rhoValue) * (d1Pin + getLoading('D1')) - getLoading('D6');
+    } else {
+        target = Number(cfg.manualTargetPct);
+    }
+
+    // Guard: rasio JV / target tidak valid → jangan sentuh anchor
+    if (!(jvD6 > jvD1) || !(target > 0)) {
+        warnings.push(
+            `Konfigurasi tidak valid: JV D6 (${jvD6}) harus > JV D1 (${jvD1}) dan target (${round01(target)}%) harus > 0. Anchor tidak diubah.`
+        );
+        return { anchors: null, steps, warnings, landedD6: null, epsilon: null };
+    }
+
+    // Epsilon: auto-kalibrasi log-logistik, atau manual
+    let eps;
+    if (cfg.epsilonAuto) {
+        eps = Math.log(target / d1Pin) / Math.log(jvD6 / jvD1);
+    } else {
+        eps = Number(cfg.manualEpsilon);
+    }
+
+    // Validasi koridor: 0 ≤ min ≤ max
+    const cMin = Number(cfg.corridorMin);
+    const cMax = Number(cfg.corridorMax);
+    if (!(cMin >= 0) || !(cMax >= cMin)) {
+        warnings.push(`Konfigurasi koridor tidak wajar (min=${cfg.corridorMin}, max=${cfg.corridorMax}) — disarankan 0 ≤ min ≤ max.`);
+    }
+
+    // Chain: growth tiap transisi dipangkas masuk koridor [min, max]
+    let a = d1Pin;
+    const chain = [a];
+    for (let i = 0; i < CHAIN.length - 1; i++) {
+        const from = CHAIN[i];
+        const to   = CHAIN[i + 1];
+        const jvFrom = jvOf(from);
+        const jvTo   = jvOf(to);
+
+        const rawGrowth     = Math.pow(jvTo / jvFrom, eps);
+        const growthPct     = (rawGrowth - 1) * 100;
+        const clippedGrowth = Math.min(Math.max(growthPct, Number(cfg.corridorMin)), Number(cfg.corridorMax));
+        if (clippedGrowth !== growthPct) {
+            warnings.push(`Langkah ${from}→${to} terpangkas dari ${growthPct.toFixed(1)}% menjadi ${clippedGrowth.toFixed(1)}%`);
+        }
+
+        a = a * (1 + clippedGrowth / 100);
+        chain.push(a);
+        steps.push({
+            from, to,
+            jvFrom, jvTo,
+            rawPct: growthPct,
+            usedPct: clippedGrowth,
+            result: round01(a)
+        });
+    }
+
+    // Anchors utama dibulatkan 0.1
+    const anchors = {};
+    CHAIN.forEach((kode, idx) => { anchors[kode] = round01(chain[idx]); });
+
+    // Varian manajerial mengikuti premium di atas pasangan fungsionalnya
+    anchors['D3-2'] = round01(anchors['D3-1'] * Number(cfg.managerialPremium));
+    anchors['D4-2'] = round01(anchors['D4-1'] * Number(cfg.managerialPremium));
+
+    // Warning band tipis D2|D3-1
+    const jvD2  = jvOf('D2');
+    const jvD31 = jvOf('D3-1');
+    if (Math.abs(jvD2 - jvD31) < 15) {
+        warnings.push(`Band tipis D2|D3-1 (selisih JV hanya ${Math.abs(jvD2 - jvD31)} poin) — pertimbangkan review scoring`);
+    }
+    // Catatan wajib
+    warnings.push('JV D5/D6 belum divalidasi scoring formal');
+
+    return { anchors, steps, warnings, landedD6: anchors['D6'], epsilon: eps };
 }
 
 // ---- Generate spread table (Min/Mid/Max rows per jenjang/sublevel) ----
@@ -110,10 +241,13 @@ function generateSpreadTableData(umkValue, params, jvScores) {
             const jv     = calcJV(scores);
             const anchorPct = params.anchors[j.code] || 50;
 
+            const loading = getLoading(j.code);
+
             ['Min', 'Mid', 'Max'].forEach(type => {
                 const thpVal  = spread.values.thp[type.toLowerCase()];
                 const gapokVal = spread.values.gapok[type.toLowerCase()];
-                const comps   = calcComponents(thpVal, params, gapokVal, anchorPct);
+                const mult = getMultiplier(sl, params);
+                const comps   = calcComponents(thpVal, params, gapokVal, mult, anchorPct, loading, umkValue);
                 const gapokPc = spread.percents.gapok[type.toLowerCase()];
                 const thpPc   = spread.percents.thp[type.toLowerCase()];
                 table.push({
@@ -141,9 +275,12 @@ function generateFullTable(umkValue, params, jvScores) {
             const spread  = calcSpread(umkValue, j.code, sl, params);
             const scores  = jvScores[j.code] || {};
             const jv      = calcJV(scores);
-            const thpMid  = spread.values.thp.mid;
             const anchorPct = params.anchors[j.code] || 50;
-            const comps   = calcComponents(thpMid, params, undefined, anchorPct);
+            const thpMid  = spread.values.thp.mid;
+            const gapokMid = spread.values.gapok.mid;
+            const mult = getMultiplier(sl, params);
+            const loading = getLoading(j.code);
+            const comps   = calcComponents(thpMid, params, gapokMid, mult, anchorPct, loading, umkValue);
             table.push({
                 jenjangCode: j.code,
                 jenjangName: j.name,
