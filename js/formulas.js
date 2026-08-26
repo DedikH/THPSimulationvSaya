@@ -310,3 +310,97 @@ function formatNumber(val) {
 function formatPercent(val, decimals = 1) {
     return val.toFixed(decimals) + '%';
 }
+
+// =====================================================
+// PENDEKATAN BARU: Grade Stacking (No-Overlap by Construction)
+// 8 grade (D1..D6, D3-2, D4-2). Dalam satu grade: sub-levels
+// ditentukan oleh multiplier eksplisit (B-E relatif terhadap A = 1.00).
+// =====================================================
+
+/**
+ * deriveGradeStack — Bangun seluruh struktur grade dari parameter dasar.
+ * @param {number} U         UMK lokasi (Rp)
+ * @param {number} C         Plafon THP (Rp)
+ * @param {number} sigmaPct  Persentase plafon efektif (70-100%)
+ * @param {number} gapPct    (unused, kept for compatibility)
+ * @returns {{T, sigmaC, s, grades: Array, warning: string|null}}
+ */
+function deriveGradeStack(U, C, sigmaPct, gapPct) {
+    const params = (typeof approachBaruParams !== 'undefined') ? approachBaruParams : DEFAULT_APPROACH_BARU;
+    const sigmaC = C * sigmaPct / 100;
+    const U_val = U || 3000000;
+    console.log('[UMK DEBUG] deriveGradeStack received U =', U, '→ U_val =', U_val);
+    let warning = null;
+
+    const compG = (params.composition && params.composition.gapok) || 75;
+    const premium = params.managerialPremium || 1.03;
+
+    // Get anchors (default if not defined)
+    const anchors = {
+        D1: 75,
+        D2: 78,
+        'D3-1': 90,
+        'D3-2': 90,
+        'D4-1': 106,
+        'D4-2': 106,
+        D5: 110,
+        D6: 120,
+        ...(params.anchors || {})
+    };
+
+    // Sub-level multipliers (B-E relative to A = 1.00)
+    const mults = {
+        A: 1.00,
+        B: 0.94,
+        C: 0.88,
+        D: 0.82,
+        E: 0.76,
+        ...(params.subLevelMultipliers || {})
+    };
+
+    const rk = v => Math.round(v / 1000) * 1000;
+
+    // We build the 8 grades directly from the mapping
+    const grades = [];
+    GRADE_MAPPING_BARU.forEach(m => {
+        const anchorPct = anchors[m.code] || 75;
+        const pmtMult = m.premium ? premium : 1;
+
+        // A sub-level = anchor% * UMK / (compG/100), then apply premium if managerial
+        const thpA = (anchorPct * U_val / 100) / (compG / 100) * pmtMult;
+
+        // Sub-levels: apply explicit multipliers relative to A
+        const subKeys = ['A', 'B', 'C', 'D', 'E'];
+        const subs = subKeys.map(key => {
+            const raw = thpA * (mults[key] || 1);
+            return {
+                raw,
+                rp: rk(raw),
+                pct: (raw / U_val) * 100
+            };
+        });
+
+        const minVal = subs[0].raw;
+        const maxVal = subs[4].raw;
+
+        grades.push({
+            label: m.code,
+            name: m.name,
+            min: minVal,
+            max: maxVal,
+            mid: (minVal + maxVal) / 2,
+            step: (maxVal - minVal) / 4,
+            subs,
+            isManagerial: m.premium
+        });
+    });
+
+    if (grades[0] && grades[0].min < U_val) {
+        warning = 'THP terendah D1-A di bawah UMK regional! Periksa Anchor D1 atau turunkan persentase Gaji Pokok.';
+    }
+
+    // T is max THP / min UMK
+    const T = sigmaC / U_val;
+
+    return { T, sigmaC, s: 0, grades, warning };
+}

@@ -44,6 +44,25 @@ function loadFromStorage() {
             selectedUMK = saved.selectedUMK || 'Kota Surabaya';
             selectedJenjang = saved.selectedJenjang || 'D3-1';
             compLocations = saved.compLocations || ['Kota Surabaya', 'Kota Malang'];
+            // Pendekatan baru: fallback 'lama' jika key tidak ada di state lama
+            approach = saved.approach || 'lama';
+            customUmkValue = (saved.customUmkValue !== undefined && saved.customUmkValue !== null) ? Number(saved.customUmkValue) : null;
+            if (saved.approachBaruParams && typeof saved.approachBaruParams === 'object') {
+                approachBaruParams = { 
+                    ...DEFAULT_APPROACH_BARU, 
+                    ...saved.approachBaruParams,
+                    composition: { ...DEFAULT_APPROACH_BARU.composition, ...(saved.approachBaruParams.composition || {}) },
+                    anchors: { ...DEFAULT_APPROACH_BARU.anchors, ...(saved.approachBaruParams.anchors || {}) },
+                    subLevelMultipliers: { ...DEFAULT_APPROACH_BARU.subLevelMultipliers, ...(saved.approachBaruParams.subLevelMultipliers || {}) }
+                };
+            } else {
+                approachBaruParams = { 
+                    ...DEFAULT_APPROACH_BARU,
+                    composition: { ...DEFAULT_APPROACH_BARU.composition },
+                    anchors: { ...DEFAULT_APPROACH_BARU.anchors },
+                    subLevelMultipliers: { ...DEFAULT_APPROACH_BARU.subLevelMultipliers }
+                };
+            }
             return;
         }
     } catch (e) {
@@ -57,6 +76,8 @@ function loadFromStorage() {
     selectedUMK = 'Kota Surabaya';
     selectedJenjang = 'D3-1';
     compLocations = ['Kota Surabaya', 'Kota Malang'];
+    approach = 'lama';
+    approachBaruParams = { ...DEFAULT_APPROACH_BARU };
 }
 
 function saveToStorage() {
@@ -66,7 +87,10 @@ function saveToStorage() {
             jvScores,
             selectedUMK,
             selectedJenjang,
-            compLocations
+            compLocations,
+            approach,
+            approachBaruParams,
+            customUmkValue
         }));
     } catch (e) {
         console.warn('Gagal save localStorage:', e);
@@ -91,8 +115,28 @@ function resetStorage() {
     jvScores = {};
     Object.keys(DEFAULT_SCORES).forEach(k => { jvScores[k] = { ...DEFAULT_SCORES[k] }; });
     selectedUMK = 'Kota Surabaya';
+    customUmkValue = null;
     selectedJenjang = 'D3-1';
     compLocations = ['Kota Surabaya', 'Kota Malang'];
+    approach = 'lama';
+    approachBaruParams = { ...DEFAULT_APPROACH_BARU };
+    currentScheme = 'skema-lama';
+    localStorage.removeItem('payroll_sim_scheme');
+    // Sync approach toggle UI
+    const btnAL = document.getElementById('btn-approach-lama');
+    const btnAB = document.getElementById('btn-approach-baru');
+    if (btnAL && btnAB) {
+        btnAL.classList.add('active');
+        btnAB.classList.remove('active');
+    }
+    // Sync scheme toggle UI
+    const btnSL = document.getElementById('btn-skema-lama');
+    const btnSG = document.getElementById('btn-skema-gapok');
+    if (btnSL && btnSG) {
+        btnSL.classList.add('active');
+        btnSG.classList.remove('active');
+    }
+    updateSidebarForApproach();
     showMenu(currentMenu);
 }
 
@@ -127,7 +171,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
     document.addEventListener('change', (e) => {
-        if (e.target.closest('#menu2-container')) {
+        if (e.target.closest('#menu2-container') && e.target.id !== 'ab-umk-value') {
             saveParamsSilent();
         }
     });
@@ -145,9 +189,9 @@ document.addEventListener('DOMContentLoaded', () => {
         btnGapok.classList.toggle('active', currentScheme === 'skema-gapok');
     }
 
-    // ---- Param mode (Manual vs Watson-Driven) ----
-    const savedParamMode = localStorage.getItem('payroll_sim_parammode');
-    paramMode = savedParamMode === 'watson' ? 'watson' : 'manual';
+    // ---- Param mode: keep manual only; Watson-Driven UI is hidden ----
+    paramMode = 'manual';
+    localStorage.setItem('payroll_sim_parammode', 'manual');
     // Deep-safe: pastikan snapshot manual anchor selalu terbentuk
     if (!params.manualAnchors || typeof params.manualAnchors !== 'object' || Object.keys(params.manualAnchors).length === 0) {
         params.manualAnchors = { ...params.anchors };
@@ -161,6 +205,16 @@ document.addEventListener('DOMContentLoaded', () => {
         btnParamWatson.classList.toggle('active', paramMode === 'watson');
     }
 
-    // Show default menu
-    showMenu('menu1');
+    // ---- Initialize approach toggle UI ----
+    const btnAL = document.getElementById('btn-approach-lama');
+    const btnAB = document.getElementById('btn-approach-baru');
+    if (btnAL && btnAB) {
+        btnAL.classList.toggle('active', approach === 'lama');
+        btnAB.classList.toggle('active', approach === 'baru');
+    }
+    updateSidebarForApproach();
+
+    // Show default menu (respect approach: redirect menu1 -> menu2 if baru)
+    const initialMenu = (approach === 'baru' && currentMenu === 'menu1') ? 'menu2' : currentMenu;
+    showMenu(initialMenu);
 });

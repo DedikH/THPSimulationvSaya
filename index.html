@@ -8,7 +8,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Simulasi Payroll v2 — Watson Wyatt × UMK Jatim</title>
+  <title>Simulasi Payroll -- Dasaria</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <link rel="stylesheet" href="css/style.css">
@@ -57,16 +57,28 @@
     </div>
   </aside>
 
-  <!-- PARAM SOURCE TOGGLE (Manual vs Watson-Driven) -->
-  <div class="main-content">
-    <div class="flex justify-center mb-3">
-      <div class="inline-flex items-center rounded-lg border border-slate-200 bg-white p-1 shadow-sm">
-        <span class="text-xs text-slate-500 self-center mr-2 ml-1">Sumber Parameter:</span>
-        <button id="btn-param-manual" class="scheme-btn active" onclick="switchParamMode('manual')">
-          <span class="mr-1">&#128203;</span> Manual
+    <div class="main-content">
+      <div class="flex justify-center mb-3 hidden">
+        <div class="inline-flex items-center rounded-lg border border-slate-200 bg-white p-1 shadow-sm">
+          <span class="text-xs text-slate-500 self-center mr-2 ml-1">Sumber Parameter:</span>
+          <button id="btn-param-manual" class="scheme-btn active" onclick="switchParamMode('manual')">
+            <span class="mr-1">&#128203;</span> Manual
+          </button>
+          <button id="btn-param-watson" class="scheme-btn" onclick="switchParamMode('watson')">
+            <span class="mr-1">&#129518;</span> Watson-Driven
+          </button>
+        </div>
+      </div>
+
+
+    <!-- APPROACH TOGGLE -->
+    <div id="approach-toggle-wrapper" class="flex justify-center mb-4">
+      <div class="inline-flex rounded-lg border border-slate-200 bg-white p-1 shadow-sm">
+        <button id="btn-approach-lama" class="scheme-btn active" onclick="toggleApproach('lama')">
+          Pendekatan Lama
         </button>
-        <button id="btn-param-watson" class="scheme-btn" onclick="switchParamMode('watson')">
-          <span class="mr-1">&#129518;</span> Watson-Driven
+        <button id="btn-approach-baru" class="scheme-btn" onclick="toggleApproach('baru')">
+          Pendekatan Baru
         </button>
       </div>
     </div>

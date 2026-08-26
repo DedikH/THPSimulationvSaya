@@ -56,6 +56,15 @@ JENJANG_LIST.forEach(j => {
     };
 });
 
+// ---- Default Sub-Level Multipliers (B-E relative to A = 1.00) ----
+const DEFAULT_SUB_LEVEL_MULTIPLIERS = {
+    A: 1.00,
+    B: 0.94,
+    C: 0.88,
+    D: 0.82,
+    E: 0.76
+};
+
 // ---- Default Parameters ----
 const DEFAULT_PARAMS = {
     // Knob mesin Watson (di-spread agar deep-merge localStorage lama aman)
@@ -161,3 +170,54 @@ const UMK_LOCATIONS = Object.keys(UMK_DATA).sort();
 
 // ---- Scheme Toggle ----
 const DEFAULT_SCHEME = 'skema-lama';
+
+// ---- Pendekatan Baru: Grade Stacking Defaults ----
+const DEFAULT_APPROACH_BARU = {
+    plafon: 15000000,
+    sigmaPct: 85,
+    gapPct: 2,
+    step: 2,
+    modelType: 'squeeze', // 'squeeze' | 'additive'
+    managerialPremium: 1.03,
+    composition: { gapok: 75 }, // Hanya gapok, tt persen dihapus!
+    anchors: {
+        D1: 75,
+        D2: 78,
+        'D3-1': 90,
+        'D3-2': 90,
+        'D4-1': 106,
+        'D4-2': 106,
+        D5: 110,
+        D6: 120
+    },
+    subLevelMultipliers: { ...DEFAULT_SUB_LEVEL_MULTIPLIERS },
+    hasPasangan: 1,
+    jumlahAnak: 2,
+    tunjKeluargaPerAnak: 100000,
+    maxMasaKerjaTahun: 5,
+    tunjLamaKerjaPerTahun: 50000
+};
+
+// ---- 8 Grade untuk Pendekatan Baru ----
+const GRADE_LABELS_BARU = ['D1', 'D2', 'D3-1', 'D4-1', 'D3-2', 'D4-2', 'D5', 'D6'];
+const GRADE_NAMES_BARU = [
+    'D1 - Entry Level',
+    'D2 - Officer',
+    'D3-1 - Principal',
+    'D4-1 - Specialist',
+    'D3-2 - Junior Management',
+    'D4-2 - Middle Management',
+    'D5 - Senior Management',
+    'D6 - Executive Management'
+];
+
+const GRADE_MAPPING_BARU = [
+    { code: 'D1', name: 'D1 - Entry Level', baseIdx: 0, premium: false },
+    { code: 'D2', name: 'D2 - Officer', baseIdx: 1, premium: false },
+    { code: 'D3-1', name: 'D3-1 - Principal', baseIdx: 2, premium: false },
+    { code: 'D4-1', name: 'D4-1 - Specialist', baseIdx: 3, premium: false },
+    { code: 'D3-2', name: 'D3-2 - Junior Management', baseIdx: 2, premium: true },
+    { code: 'D4-2', name: 'D4-2 - Middle Management', baseIdx: 3, premium: true },
+    { code: 'D5', name: 'D5 - Senior Management', baseIdx: 4, premium: false },
+    { code: 'D6', name: 'D6 - Executive Management', baseIdx: 5, premium: false }
+];
