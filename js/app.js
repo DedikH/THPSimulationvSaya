@@ -1,4 +1,4 @@
-// =====================================================
+1// =====================================================
 // APP.JS — Main Controller, Event Handlers, Init
 // =====================================================
 
@@ -53,14 +53,16 @@ function loadFromStorage() {
                     ...saved.approachBaruParams,
                     composition: { ...DEFAULT_APPROACH_BARU.composition, ...(saved.approachBaruParams.composition || {}) },
                     anchors: { ...DEFAULT_APPROACH_BARU.anchors, ...(saved.approachBaruParams.anchors || {}) },
-                    subLevelMultipliers: { ...DEFAULT_APPROACH_BARU.subLevelMultipliers, ...(saved.approachBaruParams.subLevelMultipliers || {}) }
+                    subLevelMultipliers: { ...DEFAULT_APPROACH_BARU.subLevelMultipliers, ...(saved.approachBaruParams.subLevelMultipliers || {}) },
+                    structuralAllowance: { ...DEFAULT_APPROACH_BARU.structuralAllowance, ...(saved.approachBaruParams.structuralAllowance || {}) }
                 };
             } else {
                 approachBaruParams = { 
                     ...DEFAULT_APPROACH_BARU,
                     composition: { ...DEFAULT_APPROACH_BARU.composition },
                     anchors: { ...DEFAULT_APPROACH_BARU.anchors },
-                    subLevelMultipliers: { ...DEFAULT_APPROACH_BARU.subLevelMultipliers }
+                    subLevelMultipliers: { ...DEFAULT_APPROACH_BARU.subLevelMultipliers },
+                    structuralAllowance: { ...DEFAULT_APPROACH_BARU.structuralAllowance }
                 };
             }
             return;

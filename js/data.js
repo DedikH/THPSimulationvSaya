@@ -23,12 +23,12 @@ const SUB_LEVELS = ['A', 'B', 'C', 'D', 'E'];
 const JENJANG_LIST = [
     { code: 'D1',   name: 'D1 - Entry Level',         track: 'Functional',  loading: 10.0 },
     { code: 'D2',   name: 'D2 - Officer',             track: 'Functional',  loading: 24.2 },
-    { code: 'D3-1', name: 'D3-1 - Principal',         track: 'Functional',  loading: 38.4 },
-    { code: 'D4-1', name: 'D4-1 - Specialist',        track: 'Functional',  loading: 52.6 },
-    { code: 'D3-2', name: 'D3-2 - Junior Management',    track: 'Managerial',  loading: 38.4 },
-    { code: 'D4-2', name: 'D4-2 - Middle Management',    track: 'Managerial',  loading: 52.6 },
-    { code: 'D5',   name: 'D5 - Senior Management',      track: 'Managerial',  loading: 66.8 },
-    { code: 'D6',   name: 'D6 - Executive Management',   track: 'Managerial',  loading: 81.0 }
+    { code: 'D3-1', name: 'D3-1 - Principal',         track: 'Functional',  loading: 38.4, structuralGroup: 'A', type: 'fungsional' },
+    { code: 'D4-1', name: 'D4-1 - Specialist',        track: 'Functional',  loading: 52.6, structuralGroup: 'B', type: 'fungsional' },
+    { code: 'D3-2', name: 'D3-2 - Junior Management',    track: 'Managerial',  loading: 38.4, structuralGroup: 'A', type: 'manajerial' },
+    { code: 'D4-2', name: 'D4-2 - Middle Management',    track: 'Managerial',  loading: 52.6, structuralGroup: 'B', type: 'manajerial' },
+    { code: 'D5',   name: 'D5 - Senior Management',      track: 'Managerial',  loading: 66.8, structuralGroup: 'C', type: 'manajerial' },
+    { code: 'D6',   name: 'D6 - Executive Management',   track: 'Managerial',  loading: 81.0, structuralGroup: 'C', type: 'manajerial' }
 ];
 
 // ---- Watson-Driven Anchor Engine: default knobs ----
@@ -58,11 +58,11 @@ JENJANG_LIST.forEach(j => {
 
 // ---- Default Sub-Level Multipliers (B-E relative to A = 1.00) ----
 const DEFAULT_SUB_LEVEL_MULTIPLIERS = {
-    A: 1.00,
-    B: 0.94,
-    C: 0.88,
-    D: 0.82,
-    E: 0.76
+    A: 1.01,
+    B: 1.02,
+    C: 1.03,
+    D: 1.04,
+    E: 1.05
 };
 
 // ---- Default Parameters ----
@@ -108,7 +108,11 @@ const DEFAULT_PARAMS = {
         keluargaPasangan: 300000,
         keluargaAnak: 150000,
         keluargaPlafon: 600000
-    }
+    },
+    structuralAllowance: { A: 200000, B: 400000, C: 600000 },
+    extraManajerialPct: 50,
+    enableStrukturalD31: true,
+    enableStrukturalD41: true
 };
 
 // ---- Default Job Evaluation Scores ----
@@ -174,28 +178,30 @@ const DEFAULT_SCHEME = 'skema-lama';
 // ---- Pendekatan Baru: Grade Stacking Defaults ----
 const DEFAULT_APPROACH_BARU = {
     plafon: 15000000,
-    sigmaPct: 85,
+    sigmaPct: 100,
     gapPct: 2,
     step: 2,
     modelType: 'squeeze', // 'squeeze' | 'additive'
     managerialPremium: 1.03,
-    composition: { gapok: 75 }, // Hanya gapok, tt persen dihapus!
-    anchors: {
-        D1: 75,
-        D2: 78,
-        'D3-1': 90,
-        'D3-2': 90,
-        'D4-1': 106,
-        'D4-2': 106,
-        D5: 110,
-        D6: 120
+    composition: { gapok: 75 },
+    gapokAnchors: { D1: 80, D2: 78, 'D3-1': 75, 'D4-1': 75, 'D3-2': 75, 'D4-2': 75, D5: 75, D6: 75 },
+    anchors: {},  // Dihitung otomatis dari Plafon/Sigma via calcAnchorsFromPlafon
+    subLevelMultipliers: {
+        A: 1.01,
+        B: 1.02,
+        C: 1.03,
+        D: 1.04,
+        E: 1.05
     },
-    subLevelMultipliers: { ...DEFAULT_SUB_LEVEL_MULTIPLIERS },
     hasPasangan: 1,
     jumlahAnak: 2,
     tunjKeluargaPerAnak: 100000,
     maxMasaKerjaTahun: 5,
-    tunjLamaKerjaPerTahun: 50000
+    tunjLamaKerjaPerTahun: 50000,
+    structuralAllowance: { A: 200000, B: 400000, C: 600000 },
+    extraManajerialPct: 50,
+    enableStrukturalD31: true,
+    enableStrukturalD41: true
 };
 
 // ---- 8 Grade untuk Pendekatan Baru ----

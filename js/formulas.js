@@ -33,41 +33,15 @@ function getLoading(jenjangCode) {
 // Gapok Mid% = Anchor% × Multiplier (per Pak Dika)
 // THP  Mid% = Gapok Mid% + Loading%  (from Formula 3)
 // Min  = Mid - step,  Max = Mid + step
-function calcSpread(umkValue, jenjangCode, subLevel, params) {
-    const anchor  = params.anchors[jenjangCode] || 50;
-    const mult    = getMultiplier(subLevel, params);
-    const loading = getLoading(jenjangCode);
-    const step    = params.step || 2;
-
-    let gapokMid, thpMid;
-
-    if (currentScheme === 'skema-lama') {
-        // SKEMA LAMA: Multiplier apply ke Gapok
-        gapokMid = anchor * mult;
-        thpMid   = gapokMid + loading;
-    } else {
-        // SKEMA GAJI POKOK: THP varies per sub-level, Gapok tetap per jenjang
-        thpMid   = anchor * mult + loading;  // THP = Anchor × Multiplier + Loading
-        gapokMid = anchor;                    // Gapok = Anchor (tetap, tanpa Multiplier)
-    }
-
-    // Spread: Skema Lama ada spread di Gapok & THP, Skema Gaji Pokok hanya di THP
-    const gapokMin = currentScheme === 'skema-gapok' ? gapokMid : gapokMid - step;
-    const gapokMax = currentScheme === 'skema-gapok' ? gapokMid : gapokMid + step;
-    const thpMin   = thpMid - step;
-    const thpMax   = thpMid + step;
-
-    const rk = v => Math.round((umkValue * v / 100) / 1000) * 1000;
+function calcSpread(umkValue, jenjangCode, subLevel, params, plafonAnchors, plafonVal) {
+    const anchor = plafonAnchors ? (plafonAnchors[jenjangCode] || 75) : (params.anchors[jenjangCode] || 50);
+    const rk = v => Math.round(v / 1000) * 1000;
+    const thp = rk((plafonVal || 15000000) * anchor / 100);
+    const gapok = rk(umkValue * 75 / 100);
 
     return {
-        percents: {
-            gapok: { min: gapokMin, mid: gapokMid, max: gapokMax },
-            thp:   { min: thpMin,   mid: thpMid,   max: thpMax   }
-        },
-        values: {
-            gapok: { min: rk(gapokMin), mid: rk(gapokMid), max: rk(gapokMax) },
-            thp:   { min: rk(thpMin),   mid: rk(thpMid),   max: rk(thpMax)   }
-        }
+        percents: { gapok: 75, thp: anchor },
+        values: { gapok, thp }
     };
 }
 
@@ -77,42 +51,53 @@ function calcSpread(umkValue, jenjangCode, subLevel, params) {
 // anchor: anchor percentage for the jenjang
 // loading: loading percentage for the jenjang
 // umkValue: UMK value for the location
-function calcComponents(thp, params, gapokRupiah, mult, anchor, loading, umkValue) {
+function calcComponents(thp, params, gapokRupiah, mult, anchor, loading, umkValue, gradeCode, rowType, subIdx) {
     const rk = v => Math.round(v / 1000) * 1000;
+    const abParams = (typeof approachBaruParams !== 'undefined') ? approachBaruParams : params;
 
-    let gapok, tt, ttt;
+    const gapokAnchors = abParams.gapokAnchors || {};
+    const gapokPct = gradeCode && gapokAnchors[gradeCode] !== undefined ? gapokAnchors[gradeCode] : (abParams.composition?.gapok || 75);
+    const gapok = rk(umkValue * gapokPct / 100);
 
-    if (currentScheme === 'skema-lama') {
-        // SKEMA LAMA: Semua proporsi dari THP × composition%
-        gapok = rk(thp * params.composition.gapok / 100);
-        tt    = rk(thp * params.composition.tt / 100);
-        ttt   = thp - gapok - tt;
+    const ttRiil = thp - gapok;
+
+    // 1. Tunjangan Keluarga
+    const hasPas = abParams.hasPasangan ?? 1;
+    const anak = abParams.jumlahAnak ?? 2;
+    const keluarga = rk((Number(hasPas) + Number(anak)) * (abParams.tunjKeluargaPerAnak ?? 100000));
+
+    // 2. Tunjangan Lama Kerja (varies by sub-level A-E)
+    let years = 0;
+    if (subIdx !== undefined) {
+        years = (subIdx / 4) * (abParams.maxMasaKerjaTahun ?? 5);
     } else {
-        // SKEMA GAJI POKOK: Gapok = THP_A (THP terendah) × composition.gapok% — FIXED seragam
-        const thpA = rk(((anchor || 0) + (loading || 0)) * (umkValue || 0) / 100);
-        gapok = rk(thpA * params.composition.gapok / 100);
-        const nonGapok = thp - gapok;
-        const m = mult || 1;
-        const ttNum = params.composition.tt * m;
-        const ttDen = ttNum + params.composition.ttt;
-        tt  = rk(nonGapok * ttNum / ttDen);
-        ttt = thp - gapok - tt;
+        years = (abParams.maxMasaKerjaTahun ?? 5) / 2;
+    }
+    const lamaKerja = rk(years * (abParams.tunjLamaKerjaPerTahun ?? 50000));
+
+    // 3. Tunjangan Struktural
+    let struktural = 0;
+    if (gradeCode) {
+        const jInfo = JENJANG_LIST.find(j => j.code === gradeCode);
+        if (jInfo && jInfo.structuralGroup) {
+            const group = jInfo.structuralGroup;
+            let nominal = (abParams.structuralAllowance && abParams.structuralAllowance[group]) || 0;
+            if (gradeCode === 'D3-1' && abParams.enableStrukturalD31 === false) {
+                nominal = 0;
+            } else if (gradeCode === 'D4-1' && abParams.enableStrukturalD41 === false) {
+                nominal = 0;
+            } else if (jInfo.type === 'manajerial' && abParams.extraManajerialPct > 0) {
+                nominal = nominal * (1 + abParams.extraManajerialPct / 100);
+            }
+            struktural = rk(nominal);
+        }
     }
 
-    let struktural, lamaKerja, keluarga;
-    if (currentScheme === 'skema-gapok') {
-        // SKEMA GAJI POKOK: Detail TT belum dihitung, hanya slot anggaran
-        struktural = 0;
-        lamaKerja  = 0;
-        keluarga   = 0;
-    } else {
-        // SKEMA LAMA: Detail TT dihitung normal
-        struktural = rk(tt * params.ttSplit.struktural / 100);
-        lamaKerja  = rk(tt * params.ttSplit.lamaKerja  / 100);
-        keluarga   = tt - struktural - lamaKerja;
-    }
+    const tt = keluarga + lamaKerja + struktural;
+    const ttt = Math.max(0, ttRiil - tt);
+    const finalThp = gapok + tt + ttt;
 
-    return { gapok, tt, ttt, struktural, lamaKerja, keluarga, thp };
+    return { gapok, tt, ttt, struktural, lamaKerja, keluarga, thp: finalThp };
 }
 
 // ---- 75% Compliance Check (Gapok >= 75% of Gapok+TT, per UU) ----
@@ -234,33 +219,43 @@ function calcWatsonAnchors(jvScores, cfg) {
 // ---- Generate spread table (Min/Mid/Max rows per jenjang/sublevel) ----
 function generateSpreadTableData(umkValue, params, jvScores) {
     const table = [];
+    const plafonVal = approachBaruParams?.plafon || 15000000;
+    const sigmaPct = approachBaruParams?.sigmaPct || 85;
+    const gapPct = approachBaruParams?.gapPct || 2;
+    const plafonAnchors = calcAnchorsFromPlafon(plafonVal, sigmaPct, gapPct, umkValue).anchors;
+    const gapokAnchors = approachBaruParams?.gapokAnchors || {};
+    const subMults = approachBaruParams?.subLevelMultipliers || { A: 1.01, B: 1.02, C: 1.03, D: 1.04, E: 1.05 };
+
     JENJANG_LIST.forEach(j => {
-        SUB_LEVELS.forEach(sl => {
-            const spread = calcSpread(umkValue, j.code, sl, params);
-            const scores = jvScores[j.code] || {};
-            const jv     = calcJV(scores);
-            const anchorPct = params.anchors[j.code] || 50;
+        const anchorPct = plafonAnchors[j.code] || 75;
+        const gapokPct = gapokAnchors[j.code] !== undefined ? gapokAnchors[j.code] : (approachBaruParams?.composition?.gapok || 75);
+        const loading = getLoading(j.code);
+        const scores = jvScores[j.code] || {};
+        const jv = calcJV(scores);
+        const thpBase = Math.round(plafonVal * anchorPct / 100000) * 1000;
+        const gapok = Math.round(umkValue * gapokPct / 1000) * 1000;
 
-            const loading = getLoading(j.code);
+        const subKeys = ['A', 'B', 'C', 'D', 'E'];
+        const minMaxMap = [
+            { subIdx: 0, type: 'Min', subLabel: 'A' },
+            { subIdx: 2, type: 'Mid', subLabel: 'C' },
+            { subIdx: 4, type: 'Max', subLabel: 'E' }
+        ];
 
-            ['Min', 'Mid', 'Max'].forEach(type => {
-                const thpVal  = spread.values.thp[type.toLowerCase()];
-                const gapokVal = spread.values.gapok[type.toLowerCase()];
-                const mult = getMultiplier(sl, params);
-                const comps   = calcComponents(thpVal, params, gapokVal, mult, anchorPct, loading, umkValue);
-                const gapokPc = spread.percents.gapok[type.toLowerCase()];
-                const thpPc   = spread.percents.thp[type.toLowerCase()];
-                table.push({
-                    jenjangCode: j.code,
-                    jenjangName: j.name,
-                    subLevel: sl,
-                    track: j.track,
-                    jv,
-                    type,
-                    gapokPercent: gapokPc,
-                    thpPercent:   thpPc,
-                    ...comps
-                });
+        minMaxMap.forEach(({ subIdx, type, subLabel }) => {
+            const mult = subMults[subLabel] || 1;
+            const thp = Math.round(thpBase * mult / 1000) * 1000;
+            const comps = calcComponents(thp, params, gapok, mult, anchorPct, loading, umkValue, j.code, type);
+            table.push({
+                jenjangCode: j.code,
+                jenjangName: j.name,
+                subLevel: subLabel,
+                track: j.track,
+                jv,
+                type,
+                gapokPercent: gapokPct,
+                thpPercent: anchorPct,
+                ...comps
             });
         });
     });
@@ -270,26 +265,31 @@ function generateSpreadTableData(umkValue, params, jvScores) {
 // ---- Legacy full table (used by Comparison menu) ----
 function generateFullTable(umkValue, params, jvScores) {
     const table = [];
+    const plafonVal = approachBaruParams?.plafon || 15000000;
+    const sigmaPct = approachBaruParams?.sigmaPct || 85;
+    const gapPct = approachBaruParams?.gapPct || 2;
+    const plafonAnchors = calcAnchorsFromPlafon(plafonVal, sigmaPct, gapPct, umkValue).anchors;
+    const gapokAnchors = approachBaruParams?.gapokAnchors || {};
+
     JENJANG_LIST.forEach(j => {
-        SUB_LEVELS.forEach(sl => {
-            const spread  = calcSpread(umkValue, j.code, sl, params);
-            const scores  = jvScores[j.code] || {};
-            const jv      = calcJV(scores);
-            const anchorPct = params.anchors[j.code] || 50;
-            const thpMid  = spread.values.thp.mid;
-            const gapokMid = spread.values.gapok.mid;
-            const mult = getMultiplier(sl, params);
-            const loading = getLoading(j.code);
-            const comps   = calcComponents(thpMid, params, gapokMid, mult, anchorPct, loading, umkValue);
-            table.push({
-                jenjangCode: j.code,
-                jenjangName: j.name,
-                subLevel: sl,
-                track: j.track,
-                jv,
-                thp: thpMid,
-                ...comps
-            });
+        const anchorPct = plafonAnchors[j.code] || 75;
+        const gapokPct = gapokAnchors[j.code] !== undefined ? gapokAnchors[j.code] : (approachBaruParams?.composition?.gapok || 75);
+        const loading = getLoading(j.code);
+        const scores = jvScores[j.code] || {};
+        const jv = calcJV(scores);
+        const thp = Math.round(plafonVal * anchorPct / 100000) * 1000;
+        const gapok = Math.round(umkValue * gapokPct / 1000) * 1000;
+
+        const mult = 1;
+        const comps = calcComponents(thp, params, gapok, mult, anchorPct, loading, umkValue, j.code, 'Mid');
+        table.push({
+            jenjangCode: j.code,
+            jenjangName: j.name,
+            subLevel: 'C',
+            track: j.track,
+            jv,
+            thp: thp,
+            ...comps
         });
     });
     return table;
@@ -312,6 +312,51 @@ function formatPercent(val, decimals = 1) {
 }
 
 // =====================================================
+// ANCHOR CALCULATION FROM PLAFON/SIGMA
+// Anchor % = THP / Plafon × 100
+// D6 = σ%, D1 = 75% UMK floor, D2-D5 geometric interpolation
+// =====================================================
+function calcAnchorsFromPlafon(plafon, sigmaPct, gapPct, umkValue) {
+    const rk01 = v => Math.round(v * 100) / 100;
+    const plafonVal = plafon || 15000000;
+    const sigma = sigmaPct || 85;
+    const gap = gapPct || 2;
+    const U = umkValue || 3000000;
+
+    const sigmaC = plafonVal * sigma / 100;
+    const d6Anchor = sigma;
+
+    const d1MinTHP = U * 0.75;
+    let d1Anchor = (d1MinTHP / plafonVal) * 100;
+    if (d1Anchor < 1) d1Anchor = 1;
+    if (d1Anchor >= d6Anchor) d1Anchor = d6Anchor * 0.5;
+
+    const growth = Math.pow(d6Anchor / d1Anchor, 1 / 5);
+
+    const anchors = {
+        D1:  rk01(d1Anchor),
+        D2:  rk01(d1Anchor * growth),
+        'D3-1': rk01(d1Anchor * Math.pow(growth, 2)),
+        'D3-2': rk01(d1Anchor * Math.pow(growth, 2)),
+        'D4-1': rk01(d1Anchor * Math.pow(growth, 3)),
+        'D4-2': rk01(d1Anchor * Math.pow(growth, 3)),
+        D5:  rk01(d1Anchor * Math.pow(growth, 4)),
+        D6:  rk01(d6Anchor)
+    };
+
+    return {
+        anchors,
+        sigmaC: Math.round(sigmaC / 1000) * 1000,
+        d1Anchor: rk01(d1Anchor),
+        d6Anchor: rk01(d6Anchor),
+        growth: rk01(growth),
+        d1THP: Math.round(d1MinTHP / 1000) * 1000,
+        d6THP: Math.round(sigmaC / 1000) * 1000,
+        d1Check75: d1MinTHP >= U * 0.75
+    };
+}
+
+// =====================================================
 // PENDEKATAN BARU: Grade Stacking (No-Overlap by Construction)
 // 8 grade (D1..D6, D3-2, D4-2). Dalam satu grade: sub-levels
 // ditentukan oleh multiplier eksplisit (B-E relatif terhadap A = 1.00).
@@ -327,52 +372,41 @@ function formatPercent(val, decimals = 1) {
  */
 function deriveGradeStack(U, C, sigmaPct, gapPct) {
     const params = (typeof approachBaruParams !== 'undefined') ? approachBaruParams : DEFAULT_APPROACH_BARU;
-    const sigmaC = C * sigmaPct / 100;
     const U_val = U || 3000000;
-    console.log('[UMK DEBUG] deriveGradeStack received U =', U, '→ U_val =', U_val);
+    const C_val = C || 15000000;
+    const sigmaPctVal = sigmaPct || 85;
+    const gapPctVal = gapPct || 2;
     let warning = null;
 
-    const compG = (params.composition && params.composition.gapok) || 75;
-    const premium = params.managerialPremium || 1.03;
+    const plafonResult = calcAnchorsFromPlafon(C_val, sigmaPctVal, gapPctVal, U_val);
+    const sigmaC = plafonResult.sigmaC;
+    const calculatedAnchors = plafonResult.anchors;
 
-    // Get anchors (default if not defined)
-    const anchors = {
-        D1: 75,
-        D2: 78,
-        'D3-1': 90,
-        'D3-2': 90,
-        'D4-1': 106,
-        'D4-2': 106,
-        D5: 110,
-        D6: 120,
-        ...(params.anchors || {})
-    };
+    const anchors = { ...calculatedAnchors };
 
-    // Sub-level multipliers (B-E relative to A = 1.00)
-    const mults = {
-        A: 1.00,
-        B: 0.94,
-        C: 0.88,
-        D: 0.82,
-        E: 0.76,
-        ...(params.subLevelMultipliers || {})
-    };
+    const overrides = params.anchorOverrides || params.anchorsManual;
+    if (overrides) {
+        Object.keys(overrides).forEach(k => {
+            if (overrides[k] !== undefined && overrides[k] !== null) {
+                anchors[k] = overrides[k];
+            }
+        });
+    }
 
     const rk = v => Math.round(v / 1000) * 1000;
+    const gapokAnchors = params.gapokAnchors || {};
+    const subMults = params.subLevelMultipliers || { A: 1.01, B: 1.02, C: 1.03, D: 1.04, E: 1.05 };
 
-    // We build the 8 grades directly from the mapping
     const grades = [];
     GRADE_MAPPING_BARU.forEach(m => {
         const anchorPct = anchors[m.code] || 75;
-        const pmtMult = m.premium ? premium : 1;
+        const thpBase = rk(C_val * anchorPct / 100);
 
-        // A sub-level = anchor% * UMK / (compG/100), then apply premium if managerial
-        const thpA = (anchorPct * U_val / 100) / (compG / 100) * pmtMult;
-
-        // Sub-levels: apply explicit multipliers relative to A
         const subKeys = ['A', 'B', 'C', 'D', 'E'];
+        const multE = subMults['E'] !== undefined ? subMults['E'] : 1;
         const subs = subKeys.map(key => {
-            const raw = thpA * (mults[key] || 1);
+            const mult = subMults[key] !== undefined ? subMults[key] : 1;
+            const raw = (thpBase / multE) * mult;
             return {
                 raw,
                 rp: rk(raw),
@@ -399,8 +433,8 @@ function deriveGradeStack(U, C, sigmaPct, gapPct) {
         warning = 'THP terendah D1-A di bawah UMK regional! Periksa Anchor D1 atau turunkan persentase Gaji Pokok.';
     }
 
-    // T is max THP / min UMK
     const T = sigmaC / U_val;
+    const s = grades.length > 0 ? (grades[grades.length - 1].max - grades[0].min) / (grades.length * 4) : 0;
 
-    return { T, sigmaC, s: 0, grades, warning };
+    return { T, sigmaC, s, grades, warning, plafonResult };
 }
