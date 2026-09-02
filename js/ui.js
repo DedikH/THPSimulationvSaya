@@ -950,6 +950,26 @@ function renderMenu2Baru() {
     }
 
     container.innerHTML = `
+        <!-- Lokasi UMK -->
+        <div class="card">
+            <div class="card-title">Lokasi UMK</div>
+            <div class="card-desc">Pilih lokasi UMK Jawa Timur. Nilai UMK menjadi basis perhitungan seluruh struktur (Min D1 = UMK). Bisa diedit untuk uji coba.</div>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
+                <div>
+                    <label class="block text-xs font-semibold text-slate-500 mb-1">Pilih Lokasi</label>
+                    <select id="ab-umk" class="select-field" onchange="onApproachBaruUMKChange(this.value)">
+                        ${UMK_LOCATIONS.map(loc => '<option value="' + loc + '" ' + (loc === selectedUMK ? 'selected' : '') + '>' + loc + ' -- ' + formatCurrency(UMK_DATA[loc]) + '</option>').join('')}
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-slate-500 mb-1">Nilai UMK (Rp) -- bisa diedit</label>
+                    <input type="text" id="ab-umk-value" inputmode="numeric" class="input-field font-bold text-blue-700" value="${getActiveUmk().toLocaleString('id-ID')}"
+                        oninput="onApproachBaruUmkValueChange(this.value)">
+                    <div class="text-[10px] text-slate-400 mt-1">Default dari lokasi: ${formatCurrency(UMK_DATA[selectedUMK])}. Boleh ketik pakai titik (mis. 4.500.000). Kosongkan untuk kembali ke default.</div>
+                </div>
+            </div>
+        </div>
+
         <!-- 1. Plafon THP -->
         <div class="card">
             <div class="card-title">Plafon THP</div>
@@ -984,27 +1004,6 @@ function renderMenu2Baru() {
             </div>
         </div>
 
-        <!-- 3. Composition Matrix (User-Adjustable) -->
-        <div class="card">
-            <div class="card-title">Komposisi Gaji Pokok</div>
-            <div class="card-desc">
-                Gaji Pokok dihitung berdasarkan persentase Paket (THP).
-                Tunjangan Tetap (TT) dihitung riil berdasarkan status keluarga dan masa kerja.
-                Sisa Paket otomatis dialokasikan ke Tunjangan Profesional (TTT).
-            </div>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
-                <div>
-                    <label class="block text-xs font-semibold text-slate-500 mb-1">Gaji Pokok (%)</label>
-                    <input type="number" id="ab-comp-gapok" class="input-field" value="${approachBaruParams.composition?.gapok || 75}" min="10" max="95" step="1"
-                        onchange="onApproachBaruParamChange('compGapok', this.value)">
-                </div>
-                <div class="stat-card">
-                    <div class="stat-value text-emerald-600 font-bold" id="ab-comp-gapok-display">${approachBaruParams.composition?.gapok || 75}%</div>
-                    <div class="stat-label">Porsi Gaji Pokok dari Paket</div>
-                </div>
-            </div>
-        </div>
-
         <!-- 3b. Anchor % Gapok per Jenjang (UMK-Based) -->
         <div class="card">
             <div class="card-title">Anchor % Gapok per Jenjang (UMK-Based)</div>
@@ -1015,7 +1014,7 @@ function renderMenu2Baru() {
                 ${['D1','D2','D3-1','D3-2','D4-1','D4-2','D5','D6'].map(k => {
                     const jName = JENJANG_LIST.find(j => j.code === k)?.name || k;
                     const gapokAnchorPct = (gapokAnchors && gapokAnchors[k] !== undefined) ? gapokAnchors[k] : (compG || 75);
-                    const gapokRp = Math.round(U * gapokAnchorPct / 100000) * 1000;
+                    const gapokRp = Math.round((U * gapokAnchorPct / 100) / 1000) * 1000;
                     return `
                     <div class="p-2 rounded-lg border bg-slate-50 border-slate-200">
                         <div class="text-[10px] font-semibold text-slate-500">${jName}</div>
@@ -1028,63 +1027,42 @@ function renderMenu2Baru() {
             </div>
         </div>
 
-        <!-- 4. Anchor % THP per Jenjang (Plafon-Based) -->
+        <!-- 4. Anchor % THP per Jenjang (Margin % di Atas Gapok) -->
         <div class="card">
             <div class="flex justify-between items-center mb-2">
-                <div class="card-title">Anchor % THP per Jenjang (Plafon-Based)</div>
+                <div class="card-title">Kenaikan THP di Atas Gaji Pokok (%)</div>
                 <div class="flex items-center gap-2 bg-blue-50 px-3 py-1 rounded border border-blue-150 text-xs">
                     <input type="checkbox" id="ab-no-overlap" ${approachBaruParams.isNoOverlap ? 'checked' : ''} onchange="onSolverOverlapToggle(this.checked)">
                     <label for="ab-no-overlap" class="font-bold text-blue-800 cursor-pointer">Lock No-Overlap Stacking</label>
                 </div>
             </div>
-            <div class="card-desc">Anchor dihitung dari Plafon dan σ%. D6 = σ%, D1 = 75% UMK floor, D2-D5 interpolasi geometric. Anda bisa menyesuaikan manual per jenjang.</div>
-            <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-                <div class="stat-card">
-                    <div class="stat-value text-purple-700">${formatCurrency(plafonResult.sigmaC)}</div>
-                    <div class="stat-label">σC = Plafon × σ%</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-value text-blue-700">${plafonResult.d6Anchor.toFixed(2)}%</div>
-                    <div class="stat-label">D6 Default = σ% → THP ${formatCurrency(plafonResult.d6THP)}</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-value text-emerald-700">${plafonResult.d1Anchor.toFixed(2)}%</div>
-                    <div class="stat-label">D1 Default (75% UMK floor) → THP ${formatCurrency(plafonResult.d1THP)}</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-value text-amber-700">${plafonResult.growth.toFixed(4)}x</div>
-                    <div class="stat-label">Growth Factor (D6/D1)^(1/5)</div>
-                </div>
-            </div>
+            <div class="card-desc">Persentase kenaikan/margin THP di atas Gaji Pokok untuk masing-masing jenjang. Rumus: <code>THP = Gapok + (Gapok × Margin%)</code>.</div>
             <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
                 ${['D1','D2','D3-1','D3-2','D4-1','D4-2','D5','D6'].map(k => {
                     const jName = JENJANG_LIST.find(j => j.code === k)?.name || k;
-                    const anchorVal = displayAnchors[k] || 0;
-                    const isOverridden = manualOverrides[k] !== undefined;
-                    const thpVal = Math.round(anchorVal * (C || 15000000) / 100000) * 1000;
-                    const pctSigma = plafonResult.sigmaC > 0 ? (thpVal / plafonResult.sigmaC * 100).toFixed(1) : '0';
+                    const marginPct = manualOverrides[k] !== undefined ? manualOverrides[k] : 10;
+                    const gapokPct = (gapokAnchors && gapokAnchors[k] !== undefined) ? gapokAnchors[k] : 75;
+                    const gapokRp = Math.round((U * gapokPct / 100) / 1000) * 1000;
+                    const marginRp = Math.round(gapokRp * marginPct / 100 / 1000) * 1000;
+                    const thpVal = gapokRp + marginRp;
                     return `
-                    <div class="p-2 rounded-lg border ${isOverridden ? 'bg-amber-50 border-amber-300' : 'bg-slate-50 border-slate-200'}">
-                        <div class="text-[10px] font-semibold text-slate-500">${jName}${isOverridden ? ' <span class="text-amber-600">custom</span>' : ''}</div>
-                        <input type="number" class="w-full text-lg font-bold text-blue-800 bg-transparent border-b border-blue-200 focus:border-blue-500 focus:outline-none" value="${anchorVal.toFixed(2)}" step="0.5" min="1" max="200"
-                            onchange="onAnchorManualChange('${k}', this.value)">
-                        <div class="text-[10px] text-slate-500">THP ${formatCurrency(thpVal)} <span class="text-slate-400">(${pctSigma}% dari σ)</span></div>
+                    <div class="p-2 rounded-lg border ${manualOverrides[k] !== undefined ? 'bg-amber-50 border-amber-300' : 'bg-slate-50 border-slate-200'}">
+                        <div class="text-[10px] font-semibold text-slate-500">${jName}${manualOverrides[k] !== undefined ? ' <span class="text-amber-600">custom</span>' : ''}</div>
+                        <div class="flex items-center gap-1">
+                            <span class="text-xs font-bold text-blue-600">+</span>
+                            <input type="number" class="w-full text-lg font-bold text-blue-800 bg-transparent border-b border-blue-200 focus:border-blue-500 focus:outline-none" value="${marginPct.toFixed(1)}" step="0.5" min="0" max="200"
+                                onchange="onAnchorManualChange('${k}', this.value)">
+                            <span class="text-xs font-bold text-slate-500">%</span>
+                        </div>
+                        <div class="text-[10px] text-slate-500 font-medium mt-1">THP ${formatCurrency(thpVal)}</div>
+                        <div class="text-[9px] text-slate-400">(Gapok ${formatCurrency(gapokRp)} + ${formatCurrency(marginRp)})</div>
                     </div>
                     `;
                 }).join('')}
             </div>
-            <div class="mt-3 p-2 rounded-lg ${plafonResult.d1Check75 ? 'bg-emerald-50 border border-emerald-200' : 'bg-red-50 border border-red-200'}">
-                <span class="text-xs font-semibold ${plafonResult.d1Check75 ? 'text-emerald-700' : 'text-red-700'}">
-                    ${plafonResult.d1Check75 ? '✓ D1 THP ≥ 75% UMK' : '✗ D1 THP < 75% UMK! Naikkan Plafon atau turunkan σ%.'}
-                </span>
-                <span class="text-[10px] text-slate-500 ml-2">
-                    (D1 THP ${formatCurrency(plafonResult.d1THP)} vs 75% UMK ${formatCurrency(U * 0.75)})
-                </span>
-            </div>
             <div class="mt-3 flex justify-end">
                 <button onclick="resetAnchorOverrides()" class="btn-secondary text-xs">Reset ke Default</button>
             </div>
-            <div class="mt-3 text-[10px] text-slate-400">D3-2 dan D4-2 otomatis mengikuti D3-1 dan D4-1. Premium Managerial (1.03x) diterapkan di level THP.</div>
         </div>
 
         <!-- 4b. Sub-Level Multipliers (A-E) -->
@@ -1241,7 +1219,7 @@ function renderMenu2Baru() {
         <!-- Model Perhitungan Tunjangan -->
         <div class="card">
             <div class="card-title">Model Perhitungan Tunjangan</div>
-            <div class="card-desc">Pilih bagaimana tunjangan keluarga dan lama kerja memengaruhi total take home pay (THP).</div>
+            <div class="card-desc">Pilih bagaimana tunjangan keluarga, lama kerja, dan struktural memengaruhi total take home pay (THP).</div>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div class="flex flex-col gap-2">
                     <label class="inline-flex items-center gap-2 cursor-pointer">
@@ -1249,7 +1227,7 @@ function renderMenu2Baru() {
                             onchange="onApproachBaruParamChange('modelType', this.value)">
                         <span class="font-bold text-sm text-slate-800">Model A: Potong Tunj. Profesional (Squeeze)</span>
                     </label>
-                    <div class="text-xs text-slate-500 pl-5">Total THP tetap sesuai tabel Paket. Tunjangan keluarga & lama kerja mengurangi porsi Tunjangan Profesional (TTT). Menjaga kepastian anggaran.</div>
+                    <div class="text-xs text-slate-500 pl-5">Total THP dikunci sesuai Paket. Adanya Tunjangan Tetap (Keluarga/Lama Kerja/Struktural) akan memotong porsi Tunjangan Profesional (TTT). Menjaga kepastian plafon anggaran.</div>
                 </div>
                 <div class="flex flex-col gap-2">
                     <label class="inline-flex items-center gap-2 cursor-pointer">
@@ -1257,7 +1235,7 @@ function renderMenu2Baru() {
                             onchange="onApproachBaruParamChange('modelType', this.value)">
                         <span class="font-bold text-sm text-slate-800">Model B: Tambah ke THP (Additive)</span>
                     </label>
-                    <div class="text-xs text-slate-500 pl-5">Gapok & Tunjangan Profesional (TTT) dikunci pada persentase tetap. Tunjangan keluarga & lama kerja ditambahkan di atasnya, menaikkan total THP.</div>
+                    <div class="text-xs text-slate-500 pl-5">Tunjangan Tetap (Keluarga/Lama Kerja/Struktural) ditambahkan di atas THP Dasar, sehingga menaikkan Total THP yang diterima karyawan.</div>
                 </div>
             </div>
         </div>
@@ -1290,26 +1268,6 @@ function renderMenu2Baru() {
             </div>
         </div>
 
-        <!-- 6. Lokasi UMK -->
-        <div class="card">
-            <div class="card-title">Lokasi UMK</div>
-            <div class="card-desc">Pilih lokasi UMK Jawa Timur. Nilai UMK menjadi basis perhitungan seluruh struktur (Min D1 = UMK). Bisa diedit untuk uji coba.</div>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
-                <div>
-                    <label class="block text-xs font-semibold text-slate-500 mb-1">Pilih Lokasi</label>
-                    <select id="ab-umk" class="select-field" onchange="onApproachBaruUMKChange(this.value)">
-                        ${UMK_LOCATIONS.map(loc => '<option value="' + loc + '" ' + (loc === selectedUMK ? 'selected' : '') + '>' + loc + ' -- ' + formatCurrency(UMK_DATA[loc]) + '</option>').join('')}
-                    </select>
-                </div>
-                <div>
-                    <label class="block text-xs font-semibold text-slate-500 mb-1">Nilai UMK (Rp) -- bisa diedit</label>
-                    <input type="text" id="ab-umk-value" inputmode="numeric" class="input-field font-bold text-blue-700" value="${getActiveUmk().toLocaleString('id-ID')}"
-                        oninput="onApproachBaruUmkValueChange(this.value)">
-                    <div class="text-[10px] text-slate-400 mt-1">Default dari lokasi: ${formatCurrency(UMK_DATA[selectedUMK])}. Boleh ketik pakai titik (mis. 4.500.000). Kosongkan untuk kembali ke default.</div>
-                </div>
-            </div>
-        </div>
-
         <!-- 6. Hasil Derivasi Live -->
         <div class="card ${d.warning ? 'border-amber-300' : 'border-emerald-200'}">
             <div class="card-title">Hasil Derivasi Live</div>
@@ -1322,67 +1280,6 @@ function renderMenu2Baru() {
                 <div class="stat-card"><div class="stat-value text-slate-700">${formatCurrency(U)}</div><div class="stat-label">UMK aktif</div></div>
             </div>
             ${d.warning ? '<div class="mt-3 p-2 bg-amber-50 border border-amber-200 text-amber-800 text-xs font-semibold rounded">' + d.warning + '</div>' : ''}
-        </div>
-
-        <!-- 7. Panel Pembanding Sigma -->
-        <div class="card">
-            <div class="card-title">Panel Pembanding Sigma</div>
-            <div class="card-desc">Perbandingan struktur untuk berbagai nilai sigma (dengan gap aktif g = ${gp}%). Klik baris untuk menerapkan.</div>
-            <div class="overflow-x-auto">
-                <table class="w-full text-center border-collapse border border-slate-300">
-                    <thead><tr class="bg-slate-100 border-b-2 border-slate-300 text-xs font-semibold uppercase tracking-wider">
-                        <th class="py-2 px-3 border border-slate-300">Sigma</th>
-                        <th class="py-2 px-3 border border-slate-300">sigmaC (Rp)</th>
-                        <th class="py-2 px-3 border border-slate-300">T</th>
-                        <th class="py-2 px-3 border border-slate-300">s (spread)</th>
-                        <th class="py-2 px-3 border border-slate-300">Gap D1-D2 (Rp)</th>
-                    </tr></thead>
-                    <tbody>
-                        ${[80, 85, 90, 95].map(sig => {
-                            const dr = deriveGradeStack(U, C, sig, gp);
-                            const isActive = sig === sp;
-                            const gapRp = dr.grades.length >= 2 ? formatCurrency(rk(dr.grades[1].min - dr.grades[0].max)) : '-';
-                            return '<tr class="border-b border-slate-200 ' + (isActive ? 'bg-blue-50 font-bold' : 'hover:bg-slate-50 cursor-pointer') + '"'
-                                + (isActive ? '' : ' onclick="onApproachBaruParamChange(\'sigmaPct\', ' + sig + ')"') + '>'
-                                + '<td class="py-2 px-3 border border-slate-300">' + sig + '%</td>'
-                                + '<td class="py-2 px-3 border border-slate-300">' + formatCurrency(dr.sigmaC) + '</td>'
-                                + '<td class="py-2 px-3 border border-slate-300">' + dr.T.toFixed(4) + 'x</td>'
-                                + '<td class="py-2 px-3 border border-slate-300">' + (dr.s > 0 ? formatPercent(dr.s * 100) : '-') + '</td>'
-                                + '<td class="py-2 px-3 border border-slate-300">' + gapRp + '</td></tr>';
-                        }).join('')}
-                    </tbody>
-                </table>
-            </div>
-        </div>
-
-        <!-- 8. Panel Pembanding Gap -->
-        <div class="card">
-            <div class="card-title">Panel Pembanding Gap</div>
-            <div class="card-desc">Perbandingan struktur untuk berbagai nilai gap (dengan sigma aktif = ${sp}%). Klik baris untuk menerapkan.</div>
-            <div class="overflow-x-auto">
-                <table class="w-full text-center border-collapse border border-slate-300">
-                    <thead><tr class="bg-slate-100 border-b-2 border-slate-300 text-xs font-semibold uppercase tracking-wider">
-                        <th class="py-2 px-3 border border-slate-300">Gap g</th>
-                        <th class="py-2 px-3 border border-slate-300">s (spread)</th>
-                        <th class="py-2 px-3 border border-slate-300">Step D1 (Rp)</th>
-                        <th class="py-2 px-3 border border-slate-300">Gap D1-D2 (Rp)</th>
-                    </tr></thead>
-                    <tbody>
-                        ${[0, 1, 2, 3, 5].map(gv => {
-                            const dr = deriveGradeStack(U, C, sp, gv);
-                            const isActive = gv === gp;
-                            const stepD1Rp = dr.grades.length >= 1 ? formatCurrency(rk(dr.grades[0].step)) : '-';
-                            const gapRp = dr.grades.length >= 2 ? formatCurrency(rk(dr.grades[1].min - dr.grades[0].max)) : '-';
-                            return '<tr class="border-b border-slate-200 ' + (isActive ? 'bg-purple-50 font-bold' : 'hover:bg-slate-50 cursor-pointer') + '"'
-                                + (isActive ? '' : ' onclick="onApproachBaruParamChange(\'gapPct\', ' + gv + ')"') + '>'
-                                + '<td class="py-2 px-3 border border-slate-300">' + gv + '%</td>'
-                                + '<td class="py-2 px-3 border border-slate-300">' + (dr.s > 0 ? formatPercent(dr.s * 100) : '-') + '</td>'
-                                + '<td class="py-2 px-3 border border-slate-300">' + stepD1Rp + '</td>'
-                                + '<td class="py-2 px-3 border border-slate-300">' + gapRp + '</td></tr>';
-                        }).join('')}
-                    </tbody>
-                </table>
-            </div>
         </div>
 
         <!-- 9. Rumus Ringkas -->
@@ -1510,7 +1407,7 @@ function onApproachBaruMultiplierChange(key, value) {
 
 function onAnchorManualChange(gradeCode, value) {
     const numVal = Number(value);
-    if (isNaN(numVal) || numVal < 1) return;
+    if (isNaN(numVal) || numVal < 0) return;
     approachBaruParams.anchorOverrides = approachBaruParams.anchorOverrides || {};
     approachBaruParams.anchorOverrides[gradeCode] = Math.round(numVal * 100) / 100;
     approachBaruParams.anchors = approachBaruParams.anchors || {};
@@ -1522,13 +1419,17 @@ function onAnchorManualChange(gradeCode, value) {
 }
 
 function resetAnchorOverrides() {
-    approachBaruParams.anchorOverrides = {};
-    const umkVal = getActiveUmk();
-    const plafonVal = approachBaruParams.plafon || 15000000;
-    const sigmaPctVal = approachBaruParams.sigmaPct || 85;
-    const gapPctVal = approachBaruParams.gapPct || 2;
-    const result = calcAnchorsFromPlafon(plafonVal, sigmaPctVal, gapPctVal, umkVal);
-    approachBaruParams.anchors = result.anchors;
+    approachBaruParams.anchorOverrides = {
+        D1: 10.0,
+        D2: 30.0,
+        'D3-1': 85.0,
+        'D3-2': 90.0,
+        'D4-1': 150.0,
+        'D4-2': 155.0,
+        D5: 235.0,
+        D6: 415.0
+    };
+    approachBaruParams.anchors = { ...approachBaruParams.anchorOverrides };
     saveToStorage();
     renderMenu2();
     if (currentMenu === 'menu3') renderMenu3();
@@ -2665,28 +2566,27 @@ function calcBaruCellComponents(base_THP, subIdx, modelType, params, rowType, gr
     const gapokPct = gradeCode && gapokAnchors[gradeCode] !== undefined ? gapokAnchors[gradeCode] : (approachBaruParams?.composition?.gapok || 75);
     const gapok = rk(umkVal * gapokPct / 100);
 
-    const ttRiil = base_THP - gapok;
+    const plafonCap = params?.plafon || 15000000;
 
     // TT Riil components (varies by sub-level A-E)
-    let years = 0;
-    years = (subIdx / 4) * (params.maxMasaKerjaTahun ?? 5);
+    let years = (subIdx / 4) * (params?.maxMasaKerjaTahun ?? 5);
 
-    const hasPas = params.hasPasangan ?? 1;
-    const anak = params.jumlahAnak ?? 2;
-    const tt_kel = rk((Number(hasPas) + Number(anak)) * (params.tunjKeluargaPerAnak ?? 100000));
-    const tt_lk = rk(years * (params.tunjLamaKerjaPerTahun ?? 50000));
+    const hasPas = params?.hasPasangan ?? 1;
+    const anak = params?.jumlahAnak ?? 2;
+    const tt_kel = rk((Number(hasPas) + Number(anak)) * (params?.tunjKeluargaPerAnak ?? 100000));
+    const tt_lk = rk(years * (params?.tunjLamaKerjaPerTahun ?? 50000));
 
     let tt_struct = 0;
     if (gradeCode) {
         const jInfo = JENJANG_LIST.find(j => j.code === gradeCode);
         if (jInfo && jInfo.structuralGroup) {
             const group = jInfo.structuralGroup;
-            let nominal = (params.structuralAllowance && params.structuralAllowance[group]) || 0;
-            if (gradeCode === 'D3-1' && params.enableStrukturalD31 === false) {
+            let nominal = (params?.structuralAllowance && params?.structuralAllowance[group]) || 0;
+            if (gradeCode === 'D3-1' && params?.enableStrukturalD31 === false) {
                 nominal = 0;
-            } else if (gradeCode === 'D4-1' && params.enableStrukturalD41 === false) {
+            } else if (gradeCode === 'D4-1' && params?.enableStrukturalD41 === false) {
                 nominal = 0;
-            } else if (jInfo.type === 'manajerial' && params.extraManajerialPct > 0) {
+            } else if (jInfo.type === 'manajerial' && params?.extraManajerialPct > 0) {
                 nominal = nominal * (1 + params.extraManajerialPct / 100);
             }
             tt_struct = rk(nominal);
@@ -2694,8 +2594,19 @@ function calcBaruCellComponents(base_THP, subIdx, modelType, params, rowType, gr
     }
 
     const tt = tt_kel + tt_lk + tt_struct;
-    const ttt = Math.max(0, ttRiil - tt);
-    const thp = gapok + tt + ttt;
+
+    let thp, ttt;
+    const activeModel = modelType || approachBaruParams?.modelType || 'squeeze';
+    if (activeModel === 'additive') {
+        // Model B (Additive): Tunjangan Tetap (TT) ditambahkan di atas base_THP menaikkan Total THP
+        ttt = Math.max(0, base_THP - gapok);
+        thp = Math.min(plafonCap, base_THP + tt);
+    } else {
+        // Model A (Squeeze): Total THP dikunci di base_THP, TT memotong TTT
+        const ttRiil = Math.max(0, base_THP - gapok);
+        ttt = Math.max(0, ttRiil - tt);
+        thp = Math.min(plafonCap, base_THP);
+    }
 
     return { thp, gapok, tt, ttt, tt_kel, tt_lk, tt_struct };
 }

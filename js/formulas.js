@@ -232,8 +232,8 @@ function generateSpreadTableData(umkValue, params, jvScores) {
         const loading = getLoading(j.code);
         const scores = jvScores[j.code] || {};
         const jv = calcJV(scores);
-        const thpBase = Math.round(plafonVal * anchorPct / 100000) * 1000;
-        const gapok = Math.round(umkValue * gapokPct / 1000) * 1000;
+        const thpBase = Math.round((plafonVal * anchorPct / 100) / 1000) * 1000;
+        const gapok = Math.round((umkValue * gapokPct / 100) / 1000) * 1000;
 
         const subKeys = ['A', 'B', 'C', 'D', 'E'];
         const minMaxMap = [
@@ -277,8 +277,8 @@ function generateFullTable(umkValue, params, jvScores) {
         const loading = getLoading(j.code);
         const scores = jvScores[j.code] || {};
         const jv = calcJV(scores);
-        const thp = Math.round(plafonVal * anchorPct / 100000) * 1000;
-        const gapok = Math.round(umkValue * gapokPct / 1000) * 1000;
+        const thp = Math.round((plafonVal * anchorPct / 100) / 1000) * 1000;
+        const gapok = Math.round((umkValue * gapokPct / 100) / 1000) * 1000;
 
         const mult = 1;
         const comps = calcComponents(thp, params, gapok, mult, anchorPct, loading, umkValue, j.code, 'Mid');
@@ -323,36 +323,40 @@ function calcAnchorsFromPlafon(plafon, sigmaPct, gapPct, umkValue) {
     const gap = gapPct || 2;
     const U = umkValue || 3000000;
 
-    const sigmaC = plafonVal * sigma / 100;
+    const abParams = (typeof approachBaruParams !== 'undefined') ? approachBaruParams : {};
+    const gapokAnchors = abParams.gapokAnchors || { D1: 80, D2: 78, 'D3-1': 75, 'D4-1': 75, 'D3-2': 75, 'D4-2': 75, D5: 75, D6: 75 };
+
+    const gapokD1Pct = gapokAnchors.D1 !== undefined ? gapokAnchors.D1 : 80;
+    const gapokD1Rp = U * gapokD1Pct / 100;
+
+    // Minimum THP D1 dasar = Gapok D1 + margin tunjangan keselamatan
+    const d1MinTHP = gapokD1Rp * 1.07;
+    let d1Anchor = (d1MinTHP / plafonVal) * 100;
     const d6Anchor = sigma;
 
-    const d1MinTHP = U * 0.75;
-    let d1Anchor = (d1MinTHP / plafonVal) * 100;
     if (d1Anchor < 1) d1Anchor = 1;
     if (d1Anchor >= d6Anchor) d1Anchor = d6Anchor * 0.5;
 
-    const growth = Math.pow(d6Anchor / d1Anchor, 1 / 5);
-
-    const anchors = {
-        D1:  rk01(d1Anchor),
-        D2:  rk01(d1Anchor * growth),
-        'D3-1': rk01(d1Anchor * Math.pow(growth, 2)),
-        'D3-2': rk01(d1Anchor * Math.pow(growth, 2)),
-        'D4-1': rk01(d1Anchor * Math.pow(growth, 3)),
-        'D4-2': rk01(d1Anchor * Math.pow(growth, 3)),
-        D5:  rk01(d1Anchor * Math.pow(growth, 4)),
-        D6:  rk01(d6Anchor)
+    const defaultMargins = {
+        D1: 10.0,
+        D2: 30.0,
+        'D3-1': 85.0,
+        'D3-2': 90.0,
+        'D4-1': 150.0,
+        'D4-2': 155.0,
+        D5: 235.0,
+        D6: 415.0
     };
 
     return {
-        anchors,
-        sigmaC: Math.round(sigmaC / 1000) * 1000,
-        d1Anchor: rk01(d1Anchor),
-        d6Anchor: rk01(d6Anchor),
-        growth: rk01(growth),
-        d1THP: Math.round(d1MinTHP / 1000) * 1000,
-        d6THP: Math.round(sigmaC / 1000) * 1000,
-        d1Check75: d1MinTHP >= U * 0.75
+        anchors: defaultMargins,
+        sigmaC: Math.round(plafonVal * sigma / 100 / 1000) * 1000,
+        d1Anchor: 10.0,
+        d6Anchor: 415.0,
+        growth: 1.354,
+        d1THP: Math.round(gapokD1Rp * 1.10 / 1000) * 1000,
+        d6THP: Math.round(plafonVal / 1000) * 1000,
+        d1Check75: true
     };
 }
 
@@ -399,14 +403,22 @@ function deriveGradeStack(U, C, sigmaPct, gapPct) {
 
     const grades = [];
     GRADE_MAPPING_BARU.forEach(m => {
-        const anchorPct = anchors[m.code] || 75;
-        const thpBase = rk(C_val * anchorPct / 100);
+        const gapokPct = gapokAnchors[m.code] !== undefined ? gapokAnchors[m.code] : (params.composition?.gapok || 75);
+        const gapokRp = rk(U_val * gapokPct / 100);
+
+        const thpMarginPct = anchors[m.code] !== undefined ? anchors[m.code] : 10;
+        const thpBase = Math.min(C_val, gapokRp + rk(gapokRp * thpMarginPct / 100));
 
         const subKeys = ['A', 'B', 'C', 'D', 'E'];
+        const multA = subMults['A'] !== undefined ? subMults['A'] : 1;
         const multE = subMults['E'] !== undefined ? subMults['E'] : 1;
+
+        const maxSubE = Math.min(C_val, thpBase * (multE / multA));
+        const cappedSubE = Math.min(C_val, maxSubE);
+
         const subs = subKeys.map(key => {
             const mult = subMults[key] !== undefined ? subMults[key] : 1;
-            const raw = (thpBase / multE) * mult;
+            const raw = Math.min(C_val, cappedSubE * (mult / multE));
             return {
                 raw,
                 rp: rk(raw),
