@@ -19,6 +19,7 @@ let approach = 'lama';           // 'lama' | 'baru' — pendekatan utama
 let currentMenu7Tab = 'solver';
 let selectedMenu7Cell = { gradeIdx: 2, subIdx: 2 };
 let menu7SearchQuery = '';
+let branchParams = {};
 
 // Helper: get active UMK value (custom override or location default)
 function getActiveUmk() {
@@ -113,6 +114,9 @@ function showMenu(menuId) {
         case 'menu5': renderMenu5(); break;
         case 'menu6': renderMenu6(); break;
         case 'menu7': renderMenu7(); break;
+        case 'menu8': renderMenu8(); break;
+        case 'menu9': renderMenu9(); break;
+        case 'menu10': if (typeof renderMenu10 === 'function') renderMenu10(); break;
     }
 }
 
@@ -399,10 +403,10 @@ function renderMenu2() {
             </div>
         </div>
 
-        <!-- Section C: General Settings & Step -->
+        <!-- Section C: General Settings & UMK -->
         <div class="card">
             <div class="card-title"><span>⚙️</span> General Settings & UMK</div>
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                     <label class="block text-xs font-semibold text-slate-500 mb-1">Plafon THP (Rp)</label>
                     <input type="number" id="ab-plafon-lama" class="input-field font-bold text-blue-800" value="${approachBaruParams.plafon || 15000000}" step="500000" min="0"
@@ -412,10 +416,6 @@ function renderMenu2() {
                     <label class="block text-xs font-semibold text-slate-500 mb-1">Sigma -- Porsi Tetap di Puncak (%)</label>
                     <input type="number" id="ab-sigma-lama" class="input-field font-bold text-purple-800" value="${approachBaruParams.sigmaPct || 85}" min="70" max="100" step="1"
                         onchange="onApproachBaruParamChange('sigmaPct', this.value)">
-                </div>
-                <div>
-                    <label class="block text-xs font-semibold text-slate-500 mb-1">Step Spread (% UMK)</label>
-                    <input type="number" id="p-step" class="input-field" value="${params.step}" min="0" step="0.5">
                 </div>
             </div>
 
@@ -950,7 +950,12 @@ function renderMenu2Baru() {
     }
 
     container.innerHTML = `
-        <!-- Lokasi UMK -->
+        <div class="flex items-center justify-between mb-6">
+            <div>
+                <h2 class="text-xl font-extrabold text-slate-800 tracking-tight">Parameter Head Office</h2>
+                <p class="text-xs text-slate-500">Konfigurasi struktur gaji dan plafon untuk Kantor Pusat (8 Jenjang).</p>
+            </div>
+        </div>
         <div class="card">
             <div class="card-title">Lokasi UMK</div>
             <div class="card-desc">Pilih lokasi UMK Jawa Timur. Nilai UMK menjadi basis perhitungan seluruh struktur (Min D1 = UMK). Bisa diedit untuk uji coba.</div>
@@ -1011,7 +1016,7 @@ function renderMenu2Baru() {
                 Persentase Gaji Pokok terhadap UMK per jenjang. Rumus: <code>Gapok = AnchorGapok% × UMK (${formatCurrency(U)})</code>.
             </div>
             <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
-                ${['D1','D2','D3-1','D3-2','D4-1','D4-2','D5','D6'].map(k => {
+                ${['D1','D2','D3-1','D4-1','D3-2','D4-2','D5','D6'].map(k => {
                     const jName = JENJANG_LIST.find(j => j.code === k)?.name || k;
                     const gapokAnchorPct = (gapokAnchors && gapokAnchors[k] !== undefined) ? gapokAnchors[k] : (compG || 75);
                     const gapokRp = Math.round((U * gapokAnchorPct / 100) / 1000) * 1000;
@@ -1038,7 +1043,7 @@ function renderMenu2Baru() {
             </div>
             <div class="card-desc">Persentase kenaikan/margin THP di atas Gaji Pokok untuk masing-masing jenjang. Rumus: <code>THP = Gapok + (Gapok × Margin%)</code>.</div>
             <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
-                ${['D1','D2','D3-1','D3-2','D4-1','D4-2','D5','D6'].map(k => {
+                ${['D1','D2','D3-1','D4-1','D3-2','D4-2','D5','D6'].map(k => {
                     const jName = JENJANG_LIST.find(j => j.code === k)?.name || k;
                     const marginPct = manualOverrides[k] !== undefined ? manualOverrides[k] : 10;
                     const gapokPct = (gapokAnchors && gapokAnchors[k] !== undefined) ? gapokAnchors[k] : 75;
@@ -1104,17 +1109,6 @@ function renderMenu2Baru() {
             </div>
         </div>
 
-        <!-- 5. Step Spread (% UMK) -->
-        <div class="card">
-            <div class="card-title">Step Spread (% UMK)</div>
-            <div class="card-desc">Rentang deviasi Min dan Max dari Midpoint (Gapok/THP Min = Mid - Step, Max = Mid + Step).</div>
-            <div>
-                <label class="block text-xs font-semibold text-slate-500 mb-1">Step (%)</label>
-                <input type="number" id="ab-step" class="input-field" value="${approachBaruParams.step || 2}" min="0" max="10" step="0.5"
-                    onchange="onApproachBaruParamChange('step', this.value)">
-            </div>
-        </div>
-
         <!-- Managerial Premium -->
         <div class="card">
             <div class="card-title">Managerial Premium (D3-2 & D4-2)</div>
@@ -1157,16 +1151,21 @@ function renderMenu2Baru() {
         <!-- Tunjangan Lama Kerja -->
         <div class="card">
             <div class="card-title">Tunjangan Lama Kerja</div>
-            <div class="card-desc">Konfigurasi tunjangan tetap lama kerja berdasarkan masa kerja pegawai.</div>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div class="card-desc">Tunjangan dihitung dengan rumus: <strong>Dasar + (Tahun × Kenaikan)</strong>.</div>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
-                    <label class="block text-xs font-semibold text-slate-500 mb-1">Masa Kerja Maks. (Tahun)</label>
-                    <input type="number" id="ab-max-lk" class="input-field" value="${approachBaruParams.maxMasaKerjaTahun ?? 5}" min="0" max="40" step="1"
+                    <label class="block text-xs font-semibold text-slate-500 mb-1">Masa Kerja Maks. (Thn)</label>
+                    <input type="number" id="ab-max-lk" class="input-field" value="${approachBaruParams.maxMasaKerjaTahun ?? 20}" min="0" max="40" step="1"
                         onchange="onApproachBaruParamChange('maxMasaKerjaTahun', this.value)">
                 </div>
                 <div>
-                    <label class="block text-xs font-semibold text-slate-500 mb-1">Tunj. Lama Kerja / Tahun (Rp)</label>
-                    <input type="number" id="ab-tunj-lk" class="input-field" value="${approachBaruParams.tunjLamaKerjaPerTahun ?? 50000}" step="10000"
+                    <label class="block text-xs font-semibold text-slate-500 mb-1">Tunj. Dasar (Rp)</label>
+                    <input type="number" id="ab-tunj-lk-awal" class="input-field" value="${approachBaruParams.tunjLamaKerjaAwal ?? 50000}" step="10000"
+                        onchange="onApproachBaruParamChange('tunjLamaKerjaAwal', this.value)">
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-slate-500 mb-1">Kenaikan / Tahun (Rp)</label>
+                    <input type="number" id="ab-tunj-lk" class="input-field" value="${approachBaruParams.tunjLamaKerjaPerTahun ?? 75000}" step="5000"
                         onchange="onApproachBaruParamChange('tunjLamaKerjaPerTahun', this.value)">
                 </div>
             </div>
@@ -1214,61 +1213,25 @@ function renderMenu2Baru() {
                     <label for="ab-enable-str-d41" class="text-xs font-semibold text-slate-700">D4-1 Specialist (Grup B) dapat Tunj. Struktural</label>
                 </div>
             </div>
-        </div>
-
-        <!-- Model Perhitungan Tunjangan -->
-        <div class="card">
-            <div class="card-title">Model Perhitungan Tunjangan</div>
-            <div class="card-desc">Pilih bagaimana tunjangan keluarga, lama kerja, dan struktural memengaruhi total take home pay (THP).</div>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div class="flex flex-col gap-2">
-                    <label class="inline-flex items-center gap-2 cursor-pointer">
-                        <input type="radio" name="ab-model-type" value="squeeze" ${approachBaruParams.modelType === 'squeeze' ? 'checked' : ''}
-                            onchange="onApproachBaruParamChange('modelType', this.value)">
-                        <span class="font-bold text-sm text-slate-800">Model A: Potong Tunj. Profesional (Squeeze)</span>
+            <!-- Perlakuan Tunjangan Struktural terhadap Paket THP -->
+            <div class="mt-4 pt-3 border-t border-slate-200">
+                <label class="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-2">Perlakuan Tunjangan terhadap Paket THP</label>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <label class="flex items-start gap-2 p-2.5 rounded-lg border cursor-pointer bg-blue-50/70 border-blue-300">
+                        <input type="radio" name="ab-struct-treatment" value="hybrid" checked class="mt-0.5"
+                            onchange="onApproachBaruParamChange('structTreatment', this.value)">
+                        <div>
+                            <span class="text-xs font-bold text-slate-800 block">Opsi A (Hybrid - Kesepakatan)</span>
+                            <span class="text-[10px] text-slate-500 block leading-tight">Struktural masuk Paket (potong TTT). Keluarga & Masa Kerja menambah THP.</span>
+                        </div>
                     </label>
-                    <div class="text-xs text-slate-500 pl-5">Total THP dikunci sesuai Paket. Adanya Tunjangan Tetap (Keluarga/Lama Kerja/Struktural) akan memotong porsi Tunjangan Profesional (TTT). Menjaga kepastian plafon anggaran.</div>
-                </div>
-                <div class="flex flex-col gap-2">
-                    <label class="inline-flex items-center gap-2 cursor-pointer">
-                        <input type="radio" name="ab-model-type" value="additive" ${approachBaruParams.modelType === 'additive' ? 'checked' : ''}
-                            onchange="onApproachBaruParamChange('modelType', this.value)">
-                        <span class="font-bold text-sm text-slate-800">Model B: Tambah ke THP (Additive)</span>
-                    </label>
-                    <div class="text-xs text-slate-500 pl-5">Tunjangan Tetap (Keluarga/Lama Kerja/Struktural) ditambahkan di atas THP Dasar, sehingga menaikkan Total THP yang diterima karyawan.</div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Kotak Simulasi Gaji (D1-A Min vs Max) -->
-        <div class="card bg-slate-50 border border-slate-200">
-            <div class="card-title">Kotak Simulasi Perbandingan (D1-A Min vs Max)</div>
-            <div class="card-desc">Visualisasi perbandingan komponen gaji D1-A saat baru masuk (Min) vs setelah bekerja maksimal (Max) di bawah ${approachBaruParams.modelType === 'squeeze' ? 'Model A' : 'Model B'}.</div>
-            
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3">
-                <!-- Box Min (Baru Masuk) -->
-                <div class="p-4 bg-white rounded-lg border border-slate-200 shadow-sm flex flex-col gap-1.5 font-mono text-xs">
-                    <div class="font-bold text-slate-800 border-b pb-1 mb-1">D1-A Min (Baru Masuk)</div>
-                    <div class="flex justify-between"><span>Gaji Pokok (Gapok):</span><span class="font-semibold text-emerald-700">${formatCurrency(simMin.gapok)}</span></div>
-                    <div class="flex justify-between"><span>Tunj. Keluarga:</span><span class="font-semibold text-slate-700">${formatCurrency(simMin.tt_kel)}</span></div>
-                    <div class="flex justify-between"><span>Tunj. Lama Kerja (0 thn):</span><span class="font-semibold text-slate-500">${formatCurrency(0)}</span></div>
-                    <div class="flex justify-between border-b pb-1"><span>Tunj. Profesional (TTT):</span><span class="font-semibold text-orange-700">${formatCurrency(simMin.ttt)}</span></div>
-                    <div class="flex justify-between text-sm font-extrabold text-blue-800 pt-1"><span>Total THP:</span><span>${formatCurrency(simMin.thp)}</span></div>
-                </div>
-
-                <!-- Box Max (Senior) -->
-                <div class="p-4 bg-white rounded-lg border border-slate-200 shadow-sm flex flex-col gap-1.5 font-mono text-xs">
-                    <div class="font-bold text-slate-800 border-b pb-1 mb-1">D1-A Max (Senior ${maxLk} thn)</div>
-                    <div class="flex justify-between"><span>Gaji Pokok (Gapok):</span><span class="font-semibold text-emerald-700">${formatCurrency(simMax.gapok)}</span></div>
-                    <div class="flex justify-between"><span>Tunj. Keluarga:</span><span class="font-semibold text-slate-700">${formatCurrency(simMax.tt_kel)}</span></div>
-                    <div class="flex justify-between"><span>Tunj. Lama Kerja:</span><span class="font-semibold text-amber-700">${formatCurrency(simMax.tt_lk)}</span></div>
-                    <div class="flex justify-between border-b pb-1"><span>Tunj. Profesional (TTT):</span><span class="font-semibold text-orange-700">${formatCurrency(simMax.ttt)}</span></div>
-                    <div class="flex justify-between text-sm font-extrabold text-blue-800 pt-1"><span>Total THP:</span><span>${formatCurrency(simMax.thp)}</span></div>
+                    <!-- Opsi B & C disembunyikan sesuai permintaan -->
                 </div>
             </div>
         </div>
 
         <!-- 6. Hasil Derivasi Live -->
+        <!--
         <div class="card ${d.warning ? 'border-amber-300' : 'border-emerald-200'}">
             <div class="card-title">Hasil Derivasi Live</div>
             <div class="card-desc">Semua nilai dihitung otomatis dari parameter di atas.</div>
@@ -1281,6 +1244,7 @@ function renderMenu2Baru() {
             </div>
             ${d.warning ? '<div class="mt-3 p-2 bg-amber-50 border border-amber-200 text-amber-800 text-xs font-semibold rounded">' + d.warning + '</div>' : ''}
         </div>
+        -->
 
         <!-- 9. Rumus Ringkas -->
         <div class="card">
@@ -1341,12 +1305,16 @@ function onApproachBaruParamChange(key, value) {
         approachBaruParams.jumlahAnak = Math.min(2, Math.max(0, Math.round(numVal)));
     } else if (key === 'tunjKeluargaPerAnak') {
         approachBaruParams.tunjKeluargaPerAnak = Math.max(0, numVal);
+    } else if (key === 'tunjLamaKerjaAwal') {
+        approachBaruParams.tunjLamaKerjaAwal = Number(value) || 0;
     } else if (key === 'tunjLamaKerjaPerTahun') {
         approachBaruParams.tunjLamaKerjaPerTahun = Math.max(0, numVal);
     } else if (key === 'maxMasaKerjaTahun') {
         approachBaruParams.maxMasaKerjaTahun = Math.max(0, numVal);
     } else if (key === 'modelType') {
         approachBaruParams.modelType = value;
+    } else if (key === 'structTreatment') {
+        approachBaruParams.structTreatment = value;
     } else if (key === 'managerialPremium') {
         approachBaruParams.managerialPremium = Math.min(1.5, Math.max(1, numVal));
     } else if (key === 'compGapok') {
@@ -1515,6 +1483,8 @@ function saveApproachBaruParams() {
     if (stepEl)   approachBaruParams.step     = Number(stepEl.value)   || DEFAULT_APPROACH_BARU.step;
     if (premiumEl) approachBaruParams.managerialPremium = Number(premiumEl.value) || 1.03;
     if (modelTypeEl) approachBaruParams.modelType = modelTypeEl.value;
+    const structTreatmentEl = document.querySelector('input[name="ab-struct-treatment"]:checked');
+    if (structTreatmentEl) approachBaruParams.structTreatment = structTreatmentEl.value;
 
     // Sync komposisi dari form
     const compGapokEl = document.getElementById('ab-comp-gapok');
@@ -1559,12 +1529,14 @@ function saveApproachBaruParams() {
     const anakEl = document.getElementById('ab-anak');
     const tunjAnakEl = document.getElementById('ab-tunj-anak');
     const tunjLkEl = document.getElementById('ab-tunj-lk');
+    const tunjLkAwalEl = document.getElementById('ab-tunj-lk-awal');
     const maxLkEl = document.getElementById('ab-max-lk');
     if (pasanganEl) approachBaruParams.hasPasangan = Number(pasanganEl.value) ?? 1;
     if (anakEl) approachBaruParams.jumlahAnak = Number(anakEl.value) ?? 2;
     if (tunjAnakEl) approachBaruParams.tunjKeluargaPerAnak = Number(tunjAnakEl.value) ?? 100000;
-    if (tunjLkEl) approachBaruParams.tunjLamaKerjaPerTahun = Number(tunjLkEl.value) ?? 50000;
-    if (maxLkEl) approachBaruParams.maxMasaKerjaTahun = Number(maxLkEl.value) ?? 5;
+    if (tunjLkEl) approachBaruParams.tunjLamaKerjaPerTahun = Number(tunjLkEl.value) || 0;
+    if (tunjLkAwalEl) approachBaruParams.tunjLamaKerjaAwal = Number(tunjLkAwalEl.value) || 0;
+    if (maxLkEl) approachBaruParams.maxMasaKerjaTahun = Number(maxLkEl.value) || 0;
 
     // Sync structural allowance
     approachBaruParams.structuralAllowance = approachBaruParams.structuralAllowance || { A: 200000, B: 400000, C: 600000 };
@@ -2324,7 +2296,7 @@ function renderMenu6() {
         ].join(arrow);
     }
     const rumusSections = [
-        { title: 'Rumus Dasar � berlaku kedua skema', rows: [['jv', 'Job Value', 'JV = K�15 + E�10 + S�12 + D�15 + C�10 + I�8 + X�8 + V�8 + N�5 + R�9'], ['mult', 'Multiplier Sub-Level', 'A=1.00 � B=1.07 � C=1.15 � D=1.22 � E=1.29'], ['loading', 'Loading per Jenjang (LOCKED)', 'D1=10% � D2=24.2% � D3=38.4% � D4=52.6% � D5=66.8% � D6=81%'], ['spread', 'Spread Min / Mid / Max', 'Min = Mid - Step � Max = Mid + Step'], ['rounding', 'Pembulatan Rupiah', 'Semua nilai Rp dibulatkan ke kelipatan 1.000']]},
+        { title: 'Rumus Dasar — berlaku kedua skema', rows: [['jv', 'Job Value', 'JV = K×15 + E×10 + S×12 + D×15 + C×10 + I×8 + X×8 + V×8 + N×5 + R×9'], ['mult', 'Multiplier Sub-Level', 'A=1.00 — B=1.07 — C=1.15 — D=1.22 — E=1.29'], ['loading', 'Loading per Jenjang (LOCKED)', 'D1=10% — D2=24.2% — D3=38.4% — D4=52.6% — D5=66.8% — D6=81%'], ['rounding', 'Pembulatan Rupiah', 'Semua nilai Rp dibulatkan ke kelipatan 1.000']]},
         { title: 'Skema Lama', scheme: 'lama', rows: [['thp-pct', 'THP Mid %', 'THP% = Anchor � Mult + Loading'], ['thp-rp', 'THP Rupiah', 'THP(Rp) = round1000( THP% � UMK � 100 )'], ['comp-lama', 'Komposisi Komponen', 'Gapok = THP�cG% � TT = THP�cT% � TTT = THP - Gapok - TT'], ['tt-detail-lama', 'Rincian Tunjangan Tetap', 'Struktural = TT�s% � Lama Kerja = TT�l% � Keluarga = sisa']]},
         { title: 'Skema Gaji Pokok', scheme: 'gp', rows: [['thp-a', 'THP Terendah (Sub A)', 'THP_A = round1000( Anchor x UMK / 100 )'], ['gapok-fixed', 'Gapok Seragam per Jenjang', 'Gapok = round1000( THP_A � comp.gapok% )'], ['nongapok-tt', 'Tunjangan Tetap Riil (TT)', 'TT = Tunjangan Riil (Keluarga + Masa Kerja + Struktural)'], ['ttt-residual', 'Tunjangan Tidak Tetap', 'TTT = THP - Gapok - TT']]},
         { title: 'Validasi', rows: [['check75', 'Aturan 75%', 'Gapok � ( Gapok + TT ) = 75%']] }
@@ -2336,7 +2308,7 @@ function renderMenu6() {
         <div class="card"><div class="card-title"><span>${isLama ? '??' : '??'}</span> ${isLama ? 'Skema Lama' : 'Skema Gaji Pokok'} � Alur Hitung</div><div class="card-desc">Angka di bawah adalah <span class="font-bold">nilai live</span> mengikuti parameter Anda saat ini � Demo: <span class="font-semibold">${demoJenjangObj.name}</span>, Sub-Level <span class="font-semibold">${demoSub}</span>, UMK <span class="font-semibold">${selectedUMK}</span>.</div><div class="flex flex-col items-center gap-0 my-6">${flowHTML}</div></div>
         <div class="card"><div class="card-title"><span>??</span> Kumpulan Rumus</div><div class="card-desc">Semua rumus yang dipakai simulator. Klik baris mana pun untuk penjelasan lengkap beserta contoh hitung live.</div>${rumusHTML}</div>
         <div id="flow-modal" class="modal-overlay" style="display:none" onclick="closeFlowDetail()"><div class="modal-box" onclick="event.stopPropagation()"><button class="modal-close" onclick="closeFlowDetail()" aria-label="Tutup">&times;</button><div id="flow-modal-content"></div></div></div>
-        <div class="card"><div class="card-title"><span>??</span> Daftar Variabel</div><div class="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4"><div class="p-3 bg-slate-50 rounded-lg border border-slate-200"><div class="font-bold text-sm text-slate-800">UMK (Upah Minimum Kabupaten/Kota)</div><div class="text-xs text-slate-600 mt-1">Gaji minimum regional dari 39 lokasi Jawa Timur. Dipilih di Menu 2.</div></div><div class="p-3 bg-slate-50 rounded-lg border border-slate-200"><div class="font-bold text-sm text-emerald-700">Anchor %</div><div class="text-xs text-slate-600 mt-1">Persentase dasar Gapok per jenjang. Diinput di Menu 2. Contoh: D3-1 = 100%.</div></div><div class="p-3 bg-slate-50 rounded-lg border border-slate-200"><div class="font-bold text-sm text-purple-700">Multiplier (Sub-Level)</div><div class="text-xs text-slate-600 mt-1">Pengali progression A?E. A=1.00, B=1.07, C=1.15, D=1.22, E=1.29.</div></div><div class="p-3 bg-slate-50 rounded-lg border border-slate-200"><div class="font-bold text-sm text-amber-700">Loading (Jenjang)</div><div class="text-xs text-slate-600 mt-1">Tambahan THP per jenjang. D1=10%, D2=24.2%, D3=38.4%, D4=52.6%, D5=66.8%, D6=81%.</div></div><div class="p-3 bg-slate-50 rounded-lg border border-slate-200"><div class="font-bold text-sm text-slate-700">Step (Spread)</div><div class="text-xs text-slate-600 mt-1">Selisih Min/Max dari Mid. Default = 2%. Gapok Min = Mid - step, Max = Mid + step.</div></div><div class="p-3 bg-slate-50 rounded-lg border border-slate-200"><div class="font-bold text-sm text-blue-700">Composition Matrix</div><div class="text-xs text-slate-600 mt-1">Proporsi Gapok / TT / TTT dari THP. Default: 50% / 15% / 35%.</div></div><div class="p-3 bg-slate-50 rounded-lg border border-slate-200"><div class="font-bold text-sm text-green-700">Gapok (Gaji Pokok)</div><div class="text-xs text-slate-600 mt-1">Gaji tetap per bulan. Skema Lama: dari THP. Skema Gaji Pokok: dari Anchor � Composition.</div></div><div class="p-3 bg-slate-50 rounded-lg border border-slate-200"><div class="font-bold text-sm text-amber-700">TT (Tunjangan Tetap)</div><div class="text-xs text-slate-600 mt-1">Tunjangan tetap = THP � composition.tt%. Terdiri dari Struktural, Lama Kerja, Keluarga.</div></div><div class="p-3 bg-slate-50 rounded-lg border border-slate-200"><div class="font-bold text-sm text-orange-700">TTT (Tunjangan Tidak Tetap)</div><div class="text-xs text-slate-600 mt-1">Tunjangan tidak tetap = THP - Gapok - TT. Sisa dari THP setelah pengurangan.</div></div><div class="p-3 bg-slate-50 rounded-lg border border-slate-200"><div class="font-bold text-sm text-slate-700">JV (Job Value)</div><div class="text-xs text-slate-600 mt-1">Skor evaluasi jabatan Watson Wyatt. 10 faktor � bobot. Range: 100�500.</div></div></div></div>
+        <div class="card"><div class="card-title"><span>??</span> Daftar Variabel</div><div class="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4"><div class="p-3 bg-slate-50 rounded-lg border border-slate-200"><div class="font-bold text-sm text-slate-800">UMK (Upah Minimum Kabupaten/Kota)</div><div class="text-xs text-slate-600 mt-1">Gaji minimum regional dari 39 lokasi Jawa Timur. Dipilih di Menu 2.</div></div><div class="p-3 bg-slate-50 rounded-lg border border-slate-200"><div class="font-bold text-sm text-emerald-700">Anchor %</div><div class="text-xs text-slate-600 mt-1">Persentase dasar Gapok per jenjang. Diinput di Menu 2. Contoh: D3-1 = 100%.</div></div><div class="p-3 bg-slate-50 rounded-lg border border-slate-200"><div class="font-bold text-sm text-purple-700">Multiplier (Sub-Level)</div><div class="text-xs text-slate-600 mt-1">Pengali progression A?E. A=1.00, B=1.07, C=1.15, D=1.22, E=1.29.</div></div><div class="p-3 bg-slate-50 rounded-lg border border-slate-200"><div class="font-bold text-sm text-amber-700">Loading (Jenjang)</div><div class="text-xs text-slate-600 mt-1">Tambahan THP per jenjang. D1=10%, D2=24.2%, D3=38.4%, D4=52.6%, D5=66.8%, D6=81%.</div></div><div class="p-3 bg-slate-50 rounded-lg border border-slate-200"><div class="font-bold text-sm text-blue-700">Composition Matrix</div><div class="text-xs text-slate-600 mt-1">Proporsi Gapok / TT / TTT dari THP. Default: 50% / 15% / 35%.</div></div><div class="p-3 bg-slate-50 rounded-lg border border-slate-200"><div class="font-bold text-sm text-green-700">Gapok (Gaji Pokok)</div><div class="text-xs text-slate-600 mt-1">Gaji tetap per bulan. Skema Lama: dari THP. Skema Gaji Pokok: dari Anchor � Composition.</div></div><div class="p-3 bg-slate-50 rounded-lg border border-slate-200"><div class="font-bold text-sm text-amber-700">TT (Tunjangan Tetap)</div><div class="text-xs text-slate-600 mt-1">Tunjangan tetap = THP � composition.tt%. Terdiri dari Struktural, Lama Kerja, Keluarga.</div></div><div class="p-3 bg-slate-50 rounded-lg border border-slate-200"><div class="font-bold text-sm text-orange-700">TTT (Tunjangan Tidak Tetap)</div><div class="text-xs text-slate-600 mt-1">Tunjangan tidak tetap = THP - Gapok - TT. Sisa dari THP setelah pengurangan.</div></div><div class="p-3 bg-slate-50 rounded-lg border border-slate-200"><div class="font-bold text-sm text-slate-700">JV (Job Value)</div><div class="text-xs text-slate-600 mt-1">Skor evaluasi jabatan Watson Wyatt. 10 faktor � bobot. Range: 100�500.</div></div></div></div>
         <div class="card"><div class="card-title"><span>??</span> Perbandingan 2 Skema</div><div class="sim-table-wrap border border-slate-200"><table class="w-full text-center border-collapse border border-slate-300 text-sm"><thead><tr class="bg-slate-100 border-b-2 border-slate-300"><th class="py-2 px-3 border border-slate-300">Aspek</th><th class="py-2 px-3 border border-slate-300 bg-blue-50">Skema Lama</th><th class="py-2 px-3 border border-slate-300 bg-emerald-50">Skema Gaji Pokok</th></tr></thead><tbody><tr class="border-b border-slate-200"><td class="py-2 px-3 border border-slate-300 font-semibold text-left">Gapok</td><td class="py-2 px-3 border border-slate-300">Anchor � Multiplier<br><span class="text-[10px] text-slate-500">(beragam per sub-level)</span></td><td class="py-2 px-3 border border-slate-300">Anchor � Composition%<br><span class="text-[10px] text-emerald-600 font-bold">(seragam per jenjang)</span></td></tr><tr class="border-b border-slate-200"><td class="py-2 px-3 border border-slate-300 font-semibold text-left">THP</td><td class="py-2 px-3 border border-slate-300">Gapok + Loading<br><span class="text-[10px] text-slate-500">(beragam per sub-level)</span></td><td class="py-2 px-3 border border-slate-300">Anchor � Mult + Loading<br><span class="text-[10px] text-blue-600">(beragam per sub-level)</span></td></tr><tr class="border-b border-slate-200"><td class="py-2 px-3 border border-slate-300 font-semibold text-left">Composition</td><td class="py-2 px-3 border border-slate-300">THP � %<br><span class="text-[10px] text-slate-500">(semua pakai THP)</span></td><td class="py-2 px-3 border border-slate-300">Gapok dari Anchor, TT/TTT dari THP<br><span class="text-[10px] text-slate-500">(Gapok tidak dari THP)</span></td></tr><tr class="border-b border-slate-200"><td class="py-2 px-3 border border-slate-300 font-semibold text-left">Spread Gapok</td><td class="py-2 px-3 border border-slate-300">Min / Mid / Max<br><span class="text-[10px] text-slate-500">(ada spread �step)</span></td><td class="py-2 px-3 border border-slate-300">Seragam<br><span class="text-[10px] text-emerald-600 font-bold">(Min = Mid = Max)</span></td></tr><tr><td class="py-2 px-3 border border-slate-300 font-semibold text-left">Sumber JV</td><td class="py-2 px-3 border border-slate-300" colspan="2">Menu 1 � Watson Wyatt 10 Faktor (display only)</td></tr></tbody></table></div></div>`;
 }
 
@@ -2567,14 +2539,17 @@ function calcBaruCellComponents(base_THP, subIdx, modelType, params, rowType, gr
     const gapok = rk(umkVal * gapokPct / 100);
 
     const plafonCap = params?.plafon || 15000000;
+    const cappedBaseTHP = Math.min(plafonCap, base_THP);
 
-    // TT Riil components (varies by sub-level A-E)
-    let years = (subIdx / 4) * (params?.maxMasaKerjaTahun ?? 5);
+    // TT Lama Kerja (Formula: Awal + (Tahun * Kenaikan)) - Pukul Rata sesuai parameter
+    let years = params?.maxMasaKerjaTahun ?? 0;
+    const awal_lk = params?.tunjLamaKerjaAwal ?? 50000;
+    const kenaikan_lk = params?.tunjLamaKerjaPerTahun ?? 75000;
+    const tt_lk = years > 0 ? rk(awal_lk + (years * kenaikan_lk)) : 0;
 
     const hasPas = params?.hasPasangan ?? 1;
     const anak = params?.jumlahAnak ?? 2;
     const tt_kel = rk((Number(hasPas) + Number(anak)) * (params?.tunjKeluargaPerAnak ?? 100000));
-    const tt_lk = rk(years * (params?.tunjLamaKerjaPerTahun ?? 50000));
 
     let tt_struct = 0;
     if (gradeCode) {
@@ -2596,16 +2571,29 @@ function calcBaruCellComponents(base_THP, subIdx, modelType, params, rowType, gr
     const tt = tt_kel + tt_lk + tt_struct;
 
     let thp, ttt;
-    const activeModel = modelType || approachBaruParams?.modelType || 'squeeze';
-    if (activeModel === 'additive') {
-        // Model B (Additive): Tunjangan Tetap (TT) ditambahkan di atas base_THP menaikkan Total THP
-        ttt = Math.max(0, base_THP - gapok);
-        thp = Math.min(plafonCap, base_THP + tt);
-    } else {
-        // Model A (Squeeze): Total THP dikunci di base_THP, TT memotong TTT
-        const ttRiil = Math.max(0, base_THP - gapok);
+    const structTreatment = params?.structTreatment || approachBaruParams?.structTreatment || 'hybrid';
+    
+    if (structTreatment === 'additive') {
+        // Opsi B (Full Additive): Semua tunjangan menambah THP di atas paket
+        const ttRiil = Math.max(0, cappedBaseTHP - gapok);
+        ttt = ttRiil; 
+        thp = Math.min(plafonCap, cappedBaseTHP + tt);
+    } else if (structTreatment === 'squeeze') {
+        // Opsi C (Full Squeeze): Semua TT memotong TTT, THP keras terkunci pada paket
+        const ttRiil = Math.max(0, cappedBaseTHP - gapok);
         ttt = Math.max(0, ttRiil - tt);
-        thp = Math.min(plafonCap, base_THP);
+        thp = cappedBaseTHP;
+    } else {
+        // Opsi A (Hybrid - KESEPAKATAN): 
+        // 1. Struktural masuk paket (memotong TTT)
+        // 2. Keluarga & Lama Kerja menambah paket (menambah THP)
+        const ttRiilPorsiPaket = Math.max(0, cappedBaseTHP - gapok);
+        
+        // TTT hanya dipotong oleh struktural
+        ttt = Math.max(0, ttRiilPorsiPaket - tt_struct);
+        
+        // THP bertambah seiring adanya Keluarga & Lama Kerja
+        thp = Math.min(plafonCap, cappedBaseTHP + tt_kel + tt_lk);
     }
 
     return { thp, gapok, tt, ttt, tt_kel, tt_lk, tt_struct };
@@ -2647,6 +2635,9 @@ function renderMenu3Baru() {
 
                 const badgeClass = subIdx === 0 ? 'bg-red-100 text-red-700' : subIdx === 4 ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700';
 
+                const lkYears = approachBaruParams.maxMasaKerjaTahun ?? 0;
+                const lkLabel = `<br><span class="text-[9px] font-sans text-slate-400 font-normal">(${lkYears} thn)</span>`;
+
                 rowsHTML += `
                     <tr class="hover:bg-slate-50 border-b border-slate-200 font-mono text-xs text-center">
                         <td class="py-1.5 px-2 border border-slate-300 font-sans font-bold text-slate-900 text-center whitespace-nowrap">${gr.name}</td>
@@ -2656,11 +2647,11 @@ function renderMenu3Baru() {
                         <td class="py-1.5 px-2 border border-slate-300 text-center font-sans">
                             <span class="text-[10px] font-semibold px-1.5 py-0.5 rounded ${badgeClass}">${subLabel}</span>
                         </td>
-                        <td class="py-1.5 px-2 border border-slate-300 text-center font-bold text-slate-900 bg-blue-50/30">${formatCurrency(comps.thp)}<br><span class="text-[10px] font-sans text-slate-500 font-normal">${pctSigma}% dari σ</span></td>
+                        <td class="py-1.5 px-2 border border-slate-300 text-center font-bold text-slate-900 bg-blue-50/30">${formatCurrency(comps.thp)}<br><span class="text-[10px] font-sans text-slate-500 font-normal">+${((comps.thp / comps.gapok - 1) * 100).toFixed(1)}% dari Gapok</span></td>
                         <td class="py-1.5 px-2 border border-slate-300 text-center font-semibold text-emerald-800 bg-emerald-50/30">${formatCurrency(comps.gapok)}<br><span class="text-[10px] font-sans text-slate-500 font-normal">${formatPercent(gapokPct)} UMK</span></td>
                         <td class="py-1.5 px-2 border border-slate-300 text-center text-slate-700 bg-slate-50 font-medium">${formatCurrency(comps.tt_struct)}</td>
                         <td class="py-1.5 px-2 border border-slate-300 text-center text-slate-700 bg-slate-50 font-medium">${formatCurrency(comps.tt_kel)}</td>
-                        <td class="py-1.5 px-2 border border-slate-300 text-center text-amber-800 bg-amber-50/10 font-bold">${formatCurrency(comps.tt_lk)}</td>
+                        <td class="py-1.5 px-2 border border-slate-300 text-center text-amber-800 bg-amber-50/10 font-bold">${formatCurrency(comps.tt_lk)}${lkLabel}</td>
                         <td class="py-1.5 px-2 border border-slate-300 text-center text-orange-850 bg-orange-50/30 font-semibold">${formatCurrency(comps.ttt)}</td>
                         <td class="py-1.5 px-2 border border-slate-300 text-center font-sans">
                             <span class="font-bold ${passRule ? 'text-emerald-600' : 'text-amber-600'}">${ratioText}</span>
@@ -2683,7 +2674,7 @@ function renderMenu3Baru() {
                 </div>
                 <div class="flex-grow min-w-[200px]">
                     <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Model & Komposisi Aktif</label>
-                    <div class="input-field bg-slate-100 font-bold">${modelType === 'squeeze' ? 'Model A (Squeeze)' : 'Model B (Additive)'} | Gapok ${compG}% | TT Keluarga & Masa Kerja (Riil) | Step +/-${stepVal}% UMK</div>
+                    <div class="input-field bg-slate-100 font-bold">${approachBaruParams.structTreatment === 'squeeze' ? 'Opsi C (Full Squeeze)' : approachBaruParams.structTreatment === 'additive' ? 'Opsi B (Full Additive)' : 'Opsi A (Hybrid)'} | Gapok ${compG}% | Step +/-${stepVal}% UMK</div>
                 </div>
                 <button onclick="exportSimCSV()" class="btn-secondary">Export CSV</button>
             </div>
@@ -3550,17 +3541,6 @@ function renderSimulationTab() {
                             <input type="range" min="70" max="100" step="1" value="${sp}" 
                                 class="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
                                 oninput="onMenu7SliderChange('sigmaPct', this.value)">
-                        </div>
-
-                        <!-- Step Slider -->
-                        <div>
-                            <div class="flex justify-between text-xs font-semibold text-slate-600 mb-1">
-                                <span>Step Spread</span>
-                                <span class="font-bold text-blue-600">${stepVal}% UMK</span>
-                            </div>
-                            <input type="range" min="0" max="10" step="0.5" value="${stepVal}" 
-                                class="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
-                                oninput="onMenu7SliderChange('step', this.value)">
                         </div>
 
                         <!-- compG Slider -->

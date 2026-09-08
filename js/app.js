@@ -45,7 +45,7 @@ function loadFromStorage() {
             selectedJenjang = saved.selectedJenjang || 'D3-1';
             compLocations = saved.compLocations || ['Kota Surabaya', 'Kota Malang'];
             // Pendekatan baru: fallback 'lama' jika key tidak ada di state lama
-            approach = saved.approach || 'lama';
+            approach = 'baru'; // Kunci default ke Pendekatan Baru
             customUmkValue = (saved.customUmkValue !== undefined && saved.customUmkValue !== null) ? Number(saved.customUmkValue) : null;
             if (saved.approachBaruParams && typeof saved.approachBaruParams === 'object') {
                 approachBaruParams = { 
@@ -65,6 +65,20 @@ function loadFromStorage() {
                     structuralAllowance: { ...DEFAULT_APPROACH_BARU.structuralAllowance }
                 };
             }
+            // Branch params
+            if (saved.branchParams && typeof saved.branchParams === 'object') {
+                branchParams = {
+                    ...DEFAULT_BRANCH_PARAMS,
+                    ...saved.branchParams,
+                    composition: { ...DEFAULT_BRANCH_PARAMS.composition, ...(saved.branchParams.composition || {}) },
+                    gapokAnchors: { ...DEFAULT_BRANCH_PARAMS.gapokAnchors, ...(saved.branchParams.gapokAnchors || {}) },
+                    anchorOverrides: { ...(saved.branchParams.anchorOverrides || {}) },
+                    subLevelMultipliers: { ...DEFAULT_BRANCH_PARAMS.subLevelMultipliers, ...(saved.branchParams.subLevelMultipliers || {}) },
+                    structuralAllowance: { ...DEFAULT_BRANCH_PARAMS.structuralAllowance, ...(saved.branchParams.structuralAllowance || {}) }
+                };
+            } else {
+                branchParams = JSON.parse(JSON.stringify(DEFAULT_BRANCH_PARAMS));
+            }
             return;
         }
     } catch (e) {
@@ -78,8 +92,9 @@ function loadFromStorage() {
     selectedUMK = 'Kota Surabaya';
     selectedJenjang = 'D3-1';
     compLocations = ['Kota Surabaya', 'Kota Malang'];
-    approach = 'lama';
+    approach = 'baru';
     approachBaruParams = { ...DEFAULT_APPROACH_BARU };
+    branchParams = JSON.parse(JSON.stringify(DEFAULT_BRANCH_PARAMS));
 }
 
 function saveToStorage() {
@@ -92,6 +107,7 @@ function saveToStorage() {
             compLocations,
             approach,
             approachBaruParams,
+            branchParams,
             customUmkValue
         }));
     } catch (e) {
@@ -120,8 +136,9 @@ function resetStorage() {
     customUmkValue = null;
     selectedJenjang = 'D3-1';
     compLocations = ['Kota Surabaya', 'Kota Malang'];
-    approach = 'lama';
+    approach = 'baru';
     approachBaruParams = { ...DEFAULT_APPROACH_BARU };
+    branchParams = JSON.parse(JSON.stringify(DEFAULT_BRANCH_PARAMS));
     currentScheme = 'skema-lama';
     localStorage.removeItem('payroll_sim_scheme');
     // Sync approach toggle UI

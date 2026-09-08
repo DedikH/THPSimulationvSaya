@@ -182,6 +182,7 @@ const DEFAULT_APPROACH_BARU = {
     gapPct: 2,
     step: 2,
     modelType: 'squeeze', // 'squeeze' | 'additive'
+    structTreatment: 'hybrid', // 'hybrid' (Opsi A: Struktural masuk paket) | 'additive' (Opsi B: Semua di luar paket) | 'squeeze' (Opsi C: Semua TT potong TTT)
     managerialPremium: 1.03,
     composition: { gapok: 75 },
     gapokAnchors: { D1: 80, D2: 78, 'D3-1': 75, 'D4-1': 75, 'D3-2': 75, 'D4-2': 75, D5: 75, D6: 75 },
@@ -196,8 +197,9 @@ const DEFAULT_APPROACH_BARU = {
     hasPasangan: 1,
     jumlahAnak: 2,
     tunjKeluargaPerAnak: 100000,
-    maxMasaKerjaTahun: 5,
-    tunjLamaKerjaPerTahun: 50000,
+    maxMasaKerjaTahun: 0,
+    tunjLamaKerjaAwal: 50000,
+    tunjLamaKerjaPerTahun: 75000,
     structuralAllowance: { A: 200000, B: 400000, C: 600000 },
     extraManajerialPct: 50,
     enableStrukturalD31: true,
@@ -227,3 +229,28 @@ const GRADE_MAPPING_BARU = [
     { code: 'D5', name: 'D5 - Senior Management', baseIdx: 4, premium: false },
     { code: 'D6', name: 'D6 - Executive Management', baseIdx: 5, premium: false }
 ];
+
+const DEFAULT_BRANCH_PARAMS = {
+    plafon: 10000000,
+    sigmaPct: 100,
+    gapPct: 2,
+    step: 2,
+    structTreatment: 'hybrid',
+    managerialPremium: 1.03,
+    composition: { gapok: 75 },
+    gapokAnchors: { D1: 80, D2: 78, 'D3-1': 75, 'D4-1': 75, 'D33': 75, 'D43': 75, D5: 75 },
+    anchorOverrides: {},
+    subLevelMultipliers: { A: 1.01, B: 1.02, C: 1.03, D: 1.04, E: 1.05 },
+    hasPasangan: 1,
+    jumlahAnak: 2,
+    tunjKeluargaPerAnak: 100000,
+    maxMasaKerjaTahun: 0,
+    tunjLamaKerjaAwal: 50000,
+    tunjLamaKerjaPerTahun: 75000,
+    structuralAllowance: { A: 200000, B: 400000, C: 600000 },
+    extraManajerialPct: 50,
+    enableStrukturalD31: true,
+    enableStrukturalD41: true,
+    overtimeEnabled: false,
+    overtimeHoursPerMonth: 10
+};
