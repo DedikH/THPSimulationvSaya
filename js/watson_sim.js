@@ -407,7 +407,7 @@ function calcHybridSimResult() {
     const tt = comps.tt;
     const ttt = comps.ttt;
 
-    // Sub-Level Salary Matrix for Current Grade
+    // Sub-Level Salary Matrix for Current Grade with Min-Max Ranges
     const subSalaryMatrix = HYBRID_LMS_SUB_LEVELS.map((s, idx) => {
         let rawSubJV = baseJV + (baseJV * s.adjustment);
         if (rawSubJV < bound.jvMin) rawSubJV = bound.jvMin;
@@ -415,10 +415,16 @@ function calcHybridSimResult() {
         const subJV = Math.round(rawSubJV);
 
         let subRp = rk((subJV / 100) * umkVal);
+        let nextSubRp = subRp;
         if (dStack && dStack.grades) {
             const foundGrade = dStack.grades.find(g => g.label === actualGradeCode);
             if (foundGrade && foundGrade.subs && foundGrade.subs[idx]) {
                 subRp = foundGrade.subs[idx].rp;
+                if (idx < 4 && foundGrade.subs[idx + 1]) {
+                    nextSubRp = foundGrade.subs[idx + 1].rp;
+                } else {
+                    nextSubRp = rk(foundGrade.max);
+                }
             }
         }
 
@@ -426,10 +432,19 @@ function calcHybridSimResult() {
             ? calcBaruCellComponents(subRp, idx, modelType, approachBaruParams, s.sub, actualGradeCode)
             : { thp: subRp, gapok: rk(subRp * 0.75), tt: rk(subRp * 0.15), ttt: rk(subRp * 0.10) };
 
+        const nextSubComps = (typeof calcBaruCellComponents === 'function')
+            ? calcBaruCellComponents(nextSubRp, Math.min(4, idx + 1), modelType, approachBaruParams, s.sub, actualGradeCode)
+            : { thp: nextSubRp };
+
+        const subTHPMin = subComps.thp;
+        const subTHPMax = Math.max(subTHPMin, nextSubComps.thp);
+
         return {
             sub: s.sub,
             desc: s.desc,
             subJV,
+            subTHPMin,
+            subTHPMax,
             subTHP: subComps.thp,
             subGapok: subComps.gapok,
             subTT: subComps.tt,
@@ -592,7 +607,20 @@ function getDynamicGradeMeta(gradeCode) {
 
     initWatsonSimState(code);
     const meta = WATSON_GRADE_META[code] || WATSON_GRADE_META['D4-2'];
-    const activeParams = (watsonSimState.activeParamsMap && watsonSimState.activeParamsMap[code]) || meta.defaultActive;
+    
+    // Ensure activeParams are strictly constrained by Rumpun Jabatan in Hybrid Mode
+    let activeParams = (watsonSimState.activeParamsMap && watsonSimState.activeParamsMap[code]) || meta.defaultActive;
+    const rumpun = watsonSimState.hybridState?.rumpun;
+    if (rumpun === 'O') {
+        const allowedO = ['knowledge', 'experience', 'consequence', 'scope'];
+        activeParams = activeParams.filter(p => allowedO.includes(p));
+        if (activeParams.length === 0) activeParams = [...allowedO];
+    } else if (rumpun === 'F') {
+        const allowedF = ['knowledge', 'experience', 'consequence', 'scope', 'decision', 'intContact', 'extContact', 'research'];
+        activeParams = activeParams.filter(p => allowedF.includes(p));
+        if (activeParams.length === 0) activeParams = [...allowedF];
+    }
+
     const customWeights = (watsonSimState.customWeightsMap && watsonSimState.customWeightsMap[code]) || {};
     const paramTiers = (watsonSimState.paramTiersMap && watsonSimState.paramTiersMap[code]) || meta.defaultTiers || {};
 
@@ -1428,7 +1456,7 @@ function renderMenu10() {
                 <td class="py-2.5 px-3 border border-slate-200 font-extrabold text-amber-800">Sub-Level ${sm.sub} ${sm.isCurrent ? '👈 (Aktif)' : ''}</td>
                 <td class="py-2.5 px-3 border border-slate-200 text-left text-slate-700">${sm.desc}</td>
                 <td class="py-2.5 px-3 border border-slate-200 font-mono font-bold text-purple-800">${sm.subJV} Poin</td>
-                <td class="py-2.5 px-3 border border-slate-200 font-mono font-bold text-blue-700 bg-blue-50/50">${formatCurrency(sm.subTHP)}</td>
+                <td class="py-2.5 px-3 border border-slate-200 font-mono font-bold text-blue-700 bg-blue-50/50">${formatCurrency(sm.subTHPMin)} – ${formatCurrency(sm.subTHPMax)}</td>
                 <td class="py-2.5 px-3 border border-slate-200 font-mono font-semibold text-emerald-800">${formatCurrency(sm.subGapok)}</td>
                 <td class="py-2.5 px-3 border border-slate-200 font-mono text-slate-700">${formatCurrency(sm.subTT)}</td>
                 <td class="py-2.5 px-3 border border-slate-200 font-mono text-amber-800">${formatCurrency(sm.subTTT)}</td>
@@ -1536,7 +1564,7 @@ function renderMenu10() {
             <!-- PROGRESI SUB-LEVEL & RINCIAN GAJI PADA GRADE TERPILIH -->
             <div class="card">
                 <div class="card-title text-sm mb-2">📊 Matriks Progresi Sub-Level (A–E) & Gaji pada ${res.gradeName}</div>
-                <div class="card-desc text-xs text-slate-500 mb-3">Tabel proyeksi nominal gaji untuk 5 Sub-Level pada Grade ${res.gradeCode} berdasarkan UMK ${selectedUMK} (${formatCurrency(res.umkVal)}).</div>
+                <div class="card-desc text-xs text-slate-500 mb-3">Tabel proyeksi rentang nominal gaji (Min – Max) untuk 5 Sub-Level pada Grade ${res.gradeCode} berdasarkan UMK ${selectedUMK} (${formatCurrency(res.umkVal)}).</div>
                 <div class="sim-table-wrap border border-slate-200">
                     <table class="w-full border-collapse text-xs text-center">
                         <thead>
@@ -1544,7 +1572,7 @@ function renderMenu10() {
                                 <th class="py-2.5 px-3 border border-slate-700">Sub-Level</th>
                                 <th class="py-2.5 px-3 border border-slate-700 text-left">Definisi Operasional HR</th>
                                 <th class="py-2.5 px-3 border border-slate-700">Target JV</th>
-                                <th class="py-2.5 px-3 border border-slate-700 bg-blue-900">THP Paket (Rp)</th>
+                                <th class="py-2.5 px-3 border border-slate-700 bg-blue-900">Rentang THP Paket (Min – Max)</th>
                                 <th class="py-2.5 px-3 border border-slate-700">Gaji Pokok (Rp)</th>
                                 <th class="py-2.5 px-3 border border-slate-700">T. Tetap (Rp)</th>
                                 <th class="py-2.5 px-3 border border-slate-700">T. Tidak Tetap (Rp)</th>
@@ -1573,17 +1601,34 @@ function renderMenu10() {
 
         const fullMatrixRows = (dStack && dStack.grades) ? dStack.grades.map(gr => {
             const isCurrentGrade = gr.label === res.gradeCode;
+            const boundCode = gr.label.split('-')[0];
+            const boundItem = HYBRID_ZERO_GAP_BOUNDS.find(b => b.grade === boundCode) || HYBRID_ZERO_GAP_BOUNDS[0];
+
+            const jvStep = (boundItem.jvMax - boundItem.jvMin) / 5;
+
             const cells = gr.subs.map((sub, k) => {
                 const subCode = subKeys[k];
-                const comps = (typeof calcBaruCellComponents === 'function')
+                const minComps = (typeof calcBaruCellComponents === 'function')
                     ? calcBaruCellComponents(sub.rp, k, modelType, approachBaruParams, subCode, gr.label)
                     : { thp: sub.rp };
+
+                const nextRp = (k < 4 && gr.subs[k + 1]) ? gr.subs[k + 1].rp : rk(gr.max);
+                const maxComps = (typeof calcBaruCellComponents === 'function')
+                    ? calcBaruCellComponents(nextRp, Math.min(4, k + 1), modelType, approachBaruParams, subKeys[Math.min(4, k + 1)], gr.label)
+                    : { thp: nextRp };
+
+                const minThpVal = minComps.thp;
+                const maxThpVal = Math.max(minThpVal, maxComps.thp);
+
+                const subJvMin = Math.round(boundItem.jvMin + k * jvStep);
+                const subJvMax = (k === 4) ? boundItem.jvMax : Math.round(boundItem.jvMin + (k + 1) * jvStep);
 
                 const isCurrentActiveCell = isCurrentGrade && subCode === res.subLevel;
 
                 return `
                     <td class="py-2.5 px-3 border border-slate-200 ${isCurrentActiveCell ? 'bg-amber-300 font-extrabold text-amber-950 ring-2 ring-amber-500 shadow-md' : isCurrentGrade ? 'bg-blue-50/70 font-bold' : ''}">
-                        <div class="font-bold text-xs ${isCurrentActiveCell ? 'text-amber-950 text-sm' : 'text-slate-900'}">${formatCurrency(comps.thp)}</div>
+                        <div class="font-bold text-xs ${isCurrentActiveCell ? 'text-amber-950 text-sm' : 'text-slate-900'}">${formatCurrency(minThpVal)} – ${formatCurrency(maxThpVal)}</div>
+                        <div class="text-[10px] ${isCurrentActiveCell ? 'text-amber-900 font-extrabold' : 'text-purple-700 font-semibold'}">${subJvMin}–${subJvMax} pt</div>
                     </td>
                 `;
             }).join('');

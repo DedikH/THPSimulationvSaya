@@ -145,6 +145,123 @@
 .row-fungsional td:first-child { border-left: 3px solid #3b82f6; }
 .row-managerial td:first-child { border-left: 3px solid #8b5cf6; }
 
+/* Freeze Column Styles for Matrix Table (Excel-like Freeze Panes) */
+.matrix-sticky-col-1 {
+  position: sticky;
+  left: 0px;
+  width: 90px;
+  min-width: 90px;
+  max-width: 90px;
+  z-index: 20;
+  background-color: #ffffff;
+  box-sizing: border-box;
+}
+.matrix-sticky-col-2 {
+  position: sticky;
+  left: 90px;
+  width: 170px;
+  min-width: 170px;
+  max-width: 170px;
+  z-index: 20;
+  background-color: #ffffff;
+  box-sizing: border-box;
+}
+.matrix-sticky-col-3 {
+  position: sticky;
+  left: 260px;
+  width: 130px;
+  min-width: 130px;
+  max-width: 130px;
+  z-index: 20;
+  background-color: #ffffff;
+  box-sizing: border-box;
+}
+.matrix-sticky-col-4 {
+  position: sticky;
+  left: 390px;
+  width: 105px;
+  min-width: 105px;
+  max-width: 105px;
+  z-index: 20;
+  background-color: #f8fafc;
+  box-sizing: border-box;
+  border-right: 2px solid #94a3b8 !important;
+  box-shadow: 4px 0 6px -2px rgba(0, 0, 0, 0.12);
+}
+
+/* ALL Table Headers & Rows in Header Stick to Top (Vertical Freeze) */
+.sim-table-wrap table thead,
+.sim-table-wrap table thead tr {
+  position: sticky !important;
+  top: 0 !important;
+  z-index: 35 !important;
+  background-color: #f1f5f9 !important;
+}
+
+.sim-table-wrap thead th,
+.sim-table-wrap table thead tr th {
+  position: sticky !important;
+  top: 0 !important;
+  z-index: 36 !important;
+  background-color: #f1f5f9 !important;
+  box-sizing: border-box;
+}
+
+/* Top-Left Corner 4 Header Cells Stick to BOTH Top & Left (Double Freeze) */
+.sim-table-wrap thead tr th.matrix-sticky-col-1,
+th.matrix-sticky-col-1 {
+  position: sticky !important;
+  top: 0 !important;
+  left: 0px !important;
+  z-index: 60 !important;
+  background-color: #f1f5f9 !important;
+}
+.sim-table-wrap thead tr th.matrix-sticky-col-2,
+th.matrix-sticky-col-2 {
+  position: sticky !important;
+  top: 0 !important;
+  left: 90px !important;
+  z-index: 60 !important;
+  background-color: #f1f5f9 !important;
+}
+.sim-table-wrap thead tr th.matrix-sticky-col-3,
+th.matrix-sticky-col-3 {
+  position: sticky !important;
+  top: 0 !important;
+  left: 260px !important;
+  z-index: 60 !important;
+  background-color: #f1f5f9 !important;
+}
+.sim-table-wrap thead tr th.matrix-sticky-col-4,
+th.matrix-sticky-col-4 {
+  position: sticky !important;
+  top: 0 !important;
+  left: 390px !important;
+  z-index: 60 !important;
+  background-color: #e2e8f0 !important;
+  border-right: 2px solid #94a3b8 !important;
+}
+
+/* Hover background preservation for sticky cells */
+tr:hover td.matrix-sticky-col-1,
+tr:hover td.matrix-sticky-col-2,
+tr:hover td.matrix-sticky-col-3,
+tr:hover td.matrix-sticky-col-4 {
+  background-color: #f1f5f9;
+}
+
+/* Matrix Table Container Zoom Levels */
+.matrix-zoom-75 { font-size: 75% !important; }
+.matrix-zoom-75 th, .matrix-zoom-75 td { padding: 0.25rem 0.25rem !important; }
+
+.matrix-zoom-85 { font-size: 85% !important; }
+.matrix-zoom-85 th, .matrix-zoom-85 td { padding: 0.3rem 0.35rem !important; }
+
+.matrix-zoom-100 { font-size: 100% !important; }
+
+.matrix-zoom-115 { font-size: 115% !important; }
+.matrix-zoom-115 th, .matrix-zoom-115 td { padding: 0.5rem 0.6rem !important; }
+
 /* Validation badges */
 .badge-pass {
   display: inline-flex;

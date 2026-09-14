@@ -1909,6 +1909,19 @@ function renderMenu5() {
 // =====================================================
 // MENU 5 — PENDEKATAN BARU: Spread Table (Grade Stacking)
 // =====================================================
+let matrixSortOrder = 'desc';
+let matrixZoomLevel = 100;
+
+function setMatrixSortOrder(order) {
+    matrixSortOrder = order;
+    renderMenu5();
+}
+
+function setMatrixZoom(level) {
+    matrixZoomLevel = level;
+    renderMenu5();
+}
+
 function renderMenu5Baru() {
     const container = document.getElementById('menu5-container');
     if (!container) return;
@@ -1920,8 +1933,14 @@ function renderMenu5Baru() {
     const d  = deriveGradeStack(U, C, sp, gp);
     const rk = v => Math.round(v / 1000) * 1000;
     const subLabels = ['A', 'B', 'C', 'D', 'E'];
+    const subDescMap = {
+        'A': 'A - Foundation',
+        'B': 'B - Developing',
+        'C': 'C - Proficient',
+        'D': 'D - Advanced',
+        'E': 'E - Mastery'
+    };
     const modelType = approachBaruParams.modelType || 'squeeze';
-    const compG = approachBaruParams.composition?.gapok || 75;
 
     // Main table rows: 6 grades x 5 sub-levels
     const mainTableRows = d.grades.map(gr => {
@@ -1945,89 +1964,92 @@ function renderMenu5Baru() {
         gapCells.push(baseGradesOnly[j].label + '-' + baseGradesOnly[j + 1].label + ': ' + formatCurrency(gapAmount));
     }
 
-    // Example D3 (index 2), sub C (index 2 = midpoint)
-    const hasPasangan = approachBaruParams.hasPasangan ?? 1;
-    const jumlahAnak = approachBaruParams.jumlahAnak ?? 2;
-    const tunjKeluargaPerAnak = approachBaruParams.tunjKeluargaPerAnak ?? 100000;
-    const tunjLamaKerjaPerTahun = approachBaruParams.tunjLamaKerjaPerTahun ?? 50000;
-    const maxMasaKerjaTahun = approachBaruParams.maxMasaKerjaTahun ?? 5;
+    // Build PDF-style Matrix Heatmap Table
+    const allMatrixRows = [];
+    d.grades.forEach(gr => {
+        gr.subs.forEach((sub, subIdx) => {
+            const subCode = subLabels[subIdx];
+            const comps = calcBaruCellComponents(sub.rp, subIdx, modelType, approachBaruParams, subCode, gr.label);
+            allMatrixRows.push({
+                track: gr.isManagerial ? 'Manajerial' : 'Fungsional',
+                isManagerial: gr.isManagerial,
+                gradeCode: gr.label,
+                gradeName: gr.name,
+                subCode: subCode,
+                subDesc: subDescMap[subCode],
+                gapok: comps.gapok,
+                thp: comps.thp
+            });
+        });
+    });
 
-    const exGrade = d.grades.length >= 3 ? d.grades[2] : null;
-    let exampleHTML = '';
-    if (exGrade) {
-        const exSub = exGrade.subs[2]; // C = midpoint
-        const comps = calcBaruCellComponents(exSub.rp, 2, modelType, approachBaruParams, 'flat', exGrade.label);
-        exampleHTML = `
-        <div class="card">
-            <div class="card-title">Rincian Komposisi -- Contoh D3-C</div>
-            <div class="card-desc">Contoh komposisi untuk grade D3 sub-level C (midpoint). Model: ${modelType === 'squeeze' ? 'Model A (Squeeze)' : 'Model B (Additive)'}. Gapok=${compG}%, TT=Struktural (${formatCurrency(comps.tt_struct)}) + Keluarga (Istri/Suami: ${hasPasangan ? '1' : '0'}, Anak: ${jumlahAnak}) + Lama Kerja (${(maxMasaKerjaTahun/2).toFixed(1)} thn).</div>
-            <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <div class="stat-card"><div class="stat-value text-blue-700">${formatCurrency(comps.thp)}</div><div class="stat-label">Total THP = ${formatPercent((comps.thp/U)*100)} UMK</div></div>
-                <div class="stat-card"><div class="stat-value text-emerald-700">${formatCurrency(comps.gapok)}</div><div class="stat-label">Gapok (${compG}%)</div></div>
-                <div class="stat-card"><div class="stat-value text-amber-700">${formatCurrency(comps.tt)}</div><div class="stat-label">Tunj. Tetap (Struktural + Keluarga + Lama Kerja)</div></div>
-                <div class="stat-card"><div class="stat-value text-orange-700">${formatCurrency(comps.ttt)}</div><div class="stat-label">Tunj. Profesional (Sisa)</div></div>
-            </div>
-        </div>`;
+    // Sort according to matrixSortOrder
+    if (matrixSortOrder === 'asc') {
+        // Ascending: Entry level first (D1-A -> D6-E)
+        allMatrixRows.sort((a, b) => a.thp - b.thp);
+    } else {
+        // Descending: Executive/Managerial top first (D6-E -> D1-A)
+        allMatrixRows.sort((a, b) => b.thp - a.thp);
     }
 
-    // Anchor % table (pct only) - kept as detailed reference
-    const anchorRows = d.grades.map(gr => {
-        const cells = gr.subs.map(sub =>
-            '<td class="py-1.5 px-3 border border-slate-300 text-center text-xs">' + formatPercent(sub.pct) + '</td>'
-        ).join('');
-        return '<tr class="hover:bg-slate-50 border-b border-slate-200">'
-            + '<td class="py-1.5 px-3 border border-slate-300 font-bold text-xs">' + gr.name + '</td>'
-            + cells + '</tr>';
+    // Generate nominal salary scale range columns (X-axis) in 500.000 (0.5 jt) steps
+    const minSalaryStep = 1800000;
+    const maxSalaryStep = Math.max(15000000, Math.ceil(d.sigmaC / 500000) * 500000);
+    const stepSize = 500000;
+
+    const salarySteps = [];
+    for (let val = minSalaryStep; val < maxSalaryStep; val += stepSize) {
+        salarySteps.push(val);
+    }
+
+    const salaryHeaders = salarySteps.map(val => {
+        const startFmt = (val / 1000000).toFixed(1).replace('.', ',');
+        const endFmt = ((val + stepSize) / 1000000).toFixed(1).replace('.', ',');
+        return `<th class="py-2 px-1 text-[10px] font-bold text-slate-700 border border-slate-300 text-center whitespace-nowrap min-w-[95px] bg-slate-100">
+            Rp${startFmt}jt – Rp${endFmt}jt
+        </th>`;
     }).join('');
 
-    // Summary anchor table: 6 rows with Min/Mid/Max % UMK, Spread, Gap
-    const spreadVal = d.s > 0 ? (d.s * 100).toFixed(1) : '-';
-    const summaryRows = d.grades.map((gr, idx) => {
-        const minPct = (gr.min / U * 100).toFixed(1);
-        const midPct = (gr.mid / U * 100).toFixed(1);
-        const maxPct = (gr.max / U * 100).toFixed(1);
-        
-        let gapUp = '-';
-        let nextGrade = null;
-        if (gr.label === 'D3-1') nextGrade = d.grades.find(g => g.label === 'D4-1');
-        else if (gr.label === 'D3-2') nextGrade = d.grades.find(g => g.label === 'D4-2');
-        else if (gr.label === 'D4-1' || gr.label === 'D4-2') nextGrade = d.grades.find(g => g.label === 'D5');
-        else if (idx < d.grades.length - 1) nextGrade = d.grades[idx + 1];
+    const matrixRowsHTML = allMatrixRows.map(r => {
+        const trackBadge = r.isManagerial 
+            ? '<span class="px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 text-[10px] font-bold">Manajerial</span>'
+            : '<span class="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[10px] font-bold">Fungsional</span>';
 
-        if (nextGrade) {
-            const gapRp = rk(nextGrade.min - gr.max);
-            if (gapRp >= 0) {
-                gapUp = '+Rp' + Math.round(gapRp / 1000) + 'rb';
+        const cellCols = salarySteps.map((stepVal, sIdx) => {
+            const nextStep = stepVal + stepSize;
+            
+            const isTHPStep = (r.thp >= stepVal && r.thp < nextStep) || (sIdx === salarySteps.length - 1 && r.thp >= nextStep);
+            const isInTHPRange = (stepVal < r.thp);
+
+            if (isTHPStep) {
+                const bgClass = r.isManagerial 
+                    ? 'bg-amber-300 border-amber-500 text-amber-950 font-extrabold shadow-inner' 
+                    : 'bg-emerald-300 border-emerald-500 text-emerald-950 font-extrabold shadow-inner';
+                
+                return `<td class="py-1 px-1 border border-slate-400 text-center ${bgClass} font-mono">
+                    <span class="text-[9px] font-bold block whitespace-nowrap px-1">${formatCurrency(r.thp)}</span>
+                </td>`;
+            } else if (isInTHPRange) {
+                const bgClass = r.isManagerial 
+                    ? 'bg-amber-100/70 border-amber-300 text-amber-800' 
+                    : 'bg-emerald-100/70 border-emerald-300 text-emerald-800';
+
+                return `<td class="py-1 px-1 border border-slate-200 text-center ${bgClass}"></td>`;
             } else {
-                gapUp = '-Rp' + Math.round(Math.abs(gapRp) / 1000) + 'rb (Overlap)';
+                return `<td class="py-1 px-1 border border-slate-200 text-center bg-slate-50/40"></td>`;
             }
-        }
-        
-        return '<tr class="hover:bg-slate-50 border-b border-slate-200">'
-            + '<td class="py-2 px-3 border border-slate-300 font-bold text-xs">' + gr.name + '</td>'
-            + '<td class="py-2 px-3 border border-slate-300 text-center text-xs">' + minPct + '%</td>'
-            + '<td class="py-2 px-3 border border-slate-300 text-center text-xs">' + midPct + '%</td>'
-            + '<td class="py-2 px-3 border border-slate-300 text-center text-xs">' + maxPct + '%</td>'
-            + '<td class="py-2 px-3 border border-slate-300 text-center text-xs">' + spreadVal + '%</td>'
-            + '<td class="py-2 px-3 border border-slate-300 text-center text-xs">' + gapUp + '</td>'
-            + '</tr>';
-    }).join('');
+        }).join('');
 
-    // Flat component breakdown table: Paket split per composition
-    const componentRows = d.grades.map(gr => gr.subs.map((sub, k) => {
-        const comps = calcBaruCellComponents(sub.rp, k, modelType, approachBaruParams, 'flat', gr.label);
-        return '<tr class="hover:bg-slate-50 border-b border-slate-200 font-mono text-xs text-center">'
-            + '<td class="py-1.5 px-3 border border-slate-300 font-sans font-bold text-slate-900 whitespace-nowrap text-center">' + gr.name + '</td>'
-            + '<td class="py-1.5 px-3 border border-slate-300 text-center font-sans font-semibold">' + subLabels[k] + '</td>'
-            + '<td class="py-1.5 px-3 border border-slate-300 text-center font-bold text-slate-900">' + formatCurrency(comps.thp) + '</td>'
-            + '<td class="py-1.5 px-3 border border-slate-300 text-center text-slate-500 font-sans">' + formatPercent((comps.thp/U)*100) + '</td>'
-            + '<td class="py-1.5 px-3 border border-slate-300 text-center text-emerald-700 font-semibold">' + formatCurrency(comps.gapok) + '</td>'
-            + '<td class="py-1.5 px-3 border border-slate-300 text-center text-slate-700">' + formatCurrency(comps.tt_struct) + '</td>'
-            + '<td class="py-1.5 px-3 border border-slate-300 text-center text-slate-700">' + formatCurrency(comps.tt_kel) + '</td>'
-            + '<td class="py-1.5 px-3 border border-slate-300 text-center text-amber-800 font-semibold">' + formatCurrency(comps.tt_lk) + '</td>'
-            + '<td class="py-1.5 px-3 border border-slate-300 text-center text-orange-700 font-semibold">' + formatCurrency(comps.ttt) + '</td>'
-            + '</tr>';
-    }).join('')).join('');
+        return `
+            <tr class="hover:bg-slate-100/70 border-b border-slate-200 text-xs">
+                <td class="matrix-sticky-col-1 py-1.5 px-2 border border-slate-300 text-center whitespace-nowrap">${trackBadge}</td>
+                <td class="matrix-sticky-col-2 py-1.5 px-2 border border-slate-300 font-bold text-slate-900 whitespace-nowrap text-left">${r.gradeCode} - ${r.gradeName}</td>
+                <td class="matrix-sticky-col-3 py-1.5 px-2 border border-slate-300 font-semibold text-slate-700 whitespace-nowrap text-center">${r.subDesc}</td>
+                <td class="matrix-sticky-col-4 py-1.5 px-2 border border-slate-300 font-bold text-blue-700 text-right font-mono whitespace-nowrap">${formatCurrency(r.thp)}</td>
+                ${cellCols}
+            </tr>
+        `;
+    }).join('');
 
     container.innerHTML = `
         <div class="card">
@@ -2062,66 +2084,62 @@ function renderMenu5Baru() {
             </div>
         </div>
 
-        ${exampleHTML}
-
-        <!-- Rincian Komponen per Grade & Sub-Level -->
+        <!-- PDF-Style Matriks Heatmap Grid -->
         <div class="card">
-            <div class="card-title">Rincian Komponen per Grade & Sub-Level</div>
-            <div class="card-desc">Pemecahan Paket (THP) sesuai Gaji Pokok ${compG}% dan Tunjangan Tetap Keluarga/Masa Kerja (riil).</div>
-            <div class="sim-table-wrap border border-slate-300">
-                <table class="w-full border-collapse border border-slate-300 text-center font-mono">
+            <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
+                <div>
+                    <div class="card-title">📊 Matriks Tangga Gaji per Kolom Nominal (PDF Visual Style)</div>
+                    <div class="card-desc">Tampilan matriks sebaran THP horizontal per kolom nominal. Kolom 'Jalur', 'Grade', 'Sub-Level', & 'THP' dikunci (Freeze Panes) saat digeser mendatar.</div>
+                </div>
+                <div class="flex flex-wrap items-center gap-3">
+                    <div class="flex items-center gap-1.5 bg-slate-100 p-1.5 rounded-lg border border-slate-200">
+                        <span class="text-xs font-bold text-slate-600 pl-1">Zoom:</span>
+                        <button onclick="setMatrixZoom(75)" class="px-2 py-0.5 text-xs font-bold rounded transition-colors ${matrixZoomLevel === 75 ? 'bg-blue-600 text-white shadow-sm' : 'bg-white text-slate-700 hover:bg-slate-200 border border-slate-300'}">75%</button>
+                        <button onclick="setMatrixZoom(85)" class="px-2 py-0.5 text-xs font-bold rounded transition-colors ${matrixZoomLevel === 85 ? 'bg-blue-600 text-white shadow-sm' : 'bg-white text-slate-700 hover:bg-slate-200 border border-slate-300'}">85%</button>
+                        <button onclick="setMatrixZoom(100)" class="px-2 py-0.5 text-xs font-bold rounded transition-colors ${matrixZoomLevel === 100 ? 'bg-blue-600 text-white shadow-sm' : 'bg-white text-slate-700 hover:bg-slate-200 border border-slate-300'}">100%</button>
+                        <button onclick="setMatrixZoom(115)" class="px-2 py-0.5 text-xs font-bold rounded transition-colors ${matrixZoomLevel === 115 ? 'bg-blue-600 text-white shadow-sm' : 'bg-white text-slate-700 hover:bg-slate-200 border border-slate-300'}">115%</button>
+                    </div>
+                    <div class="flex items-center gap-1.5 bg-slate-100 p-1.5 rounded-lg border border-slate-200">
+                        <span class="text-xs font-bold text-slate-600 pl-1">Urutan:</span>
+                        <button onclick="setMatrixSortOrder('asc')" class="px-2.5 py-0.5 text-xs font-bold rounded transition-colors ${matrixSortOrder === 'asc' ? 'bg-blue-600 text-white shadow-sm' : 'bg-white text-slate-700 hover:bg-slate-200 border border-slate-300'}">
+                            ⬆️ Entry (D1 → D6)
+                        </button>
+                        <button onclick="setMatrixSortOrder('desc')" class="px-2.5 py-0.5 text-xs font-bold rounded transition-colors ${matrixSortOrder === 'desc' ? 'bg-blue-600 text-white shadow-sm' : 'bg-white text-slate-700 hover:bg-slate-200 border border-slate-300'}">
+                            ⬇️ Manajerial (D6 → D1)
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <div class="sim-table-wrap border border-slate-300 overflow-x-auto matrix-zoom-${matrixZoomLevel}">
+                <table class="w-full border-collapse border border-slate-300 text-center">
                     <thead>
-                        <tr class="bg-slate-100 border-b-2 border-slate-300 text-slate-600 font-semibold uppercase tracking-wider text-[10px] text-center">
-                            <th class="py-2 px-2 border border-slate-300" rowspan="2">Grade</th>
-                            <th class="py-2 px-2 border border-slate-300" rowspan="2">Sub</th>
-                            <th class="py-2 px-2 border border-slate-300" rowspan="2">THP (Total)</th>
-                            <th class="py-2 px-2 border border-slate-300" rowspan="2">% UMK</th>
-                            <th class="py-2 px-2 border border-slate-300 bg-emerald-50 text-emerald-800" rowspan="2">Gapok</th>
-                            <th class="py-2 px-2 border border-slate-300 bg-slate-50" colspan="3">Tunjangan Tetap (TT)</th>
-                            <th class="py-2 px-2 border border-slate-300 bg-orange-50 text-orange-850" rowspan="2">Tunj. Profesional (TTT)</th>
-                        </tr>
-                        <tr class="bg-slate-50 border-b border-slate-300 text-slate-500 font-semibold uppercase tracking-wider text-[9px] text-center">
-                            <th class="py-1 px-2 border border-slate-300 text-center bg-slate-50">Struktural</th>
-                            <th class="py-1 px-2 border border-slate-300 text-center bg-slate-50">Keluarga</th>
-                            <th class="py-1 px-2 border border-slate-300 text-center bg-amber-50/10">Lama Kerja</th>
+                        <tr class="bg-slate-100 border-b-2 border-slate-300 text-slate-700 font-semibold text-xs">
+                            <th class="matrix-sticky-col-1 py-2 px-2 border border-slate-300 text-center whitespace-nowrap bg-slate-100">Jalur</th>
+                            <th onclick="setMatrixSortOrder('${matrixSortOrder === 'asc' ? 'desc' : 'asc'}')" class="matrix-sticky-col-2 py-2 px-2 border border-slate-300 text-left whitespace-nowrap bg-slate-100 cursor-pointer hover:bg-slate-200" title="Klik untuk mengubah urutan">
+                                Grade Jabatan ${matrixSortOrder === 'asc' ? '▲' : '▼'}
+                            </th>
+                            <th class="matrix-sticky-col-3 py-2 px-2 border border-slate-300 text-center whitespace-nowrap bg-slate-100">Sub-Level & Kompetensi</th>
+                            <th class="matrix-sticky-col-4 py-2 px-2 border border-slate-300 text-right whitespace-nowrap bg-blue-50 text-blue-800">THP (Rp)</th>
+                            ${salaryHeaders}
                         </tr>
                     </thead>
-                    <tbody>${componentRows}</tbody>
+                    <tbody>
+                        ${matrixRowsHTML}
+                    </tbody>
                 </table>
             </div>
         </div>
 
-        <!-- Ringkasan Anchor % per Grade -->
+        <!-- Staircase Progression Chart (Horizontal Floating Range Box) -->
         <div class="card">
-            <div class="card-title">Ringkasan Anchor % per Grade</div>
-            <div class="card-desc">Anchor % = posisi grade relatif terhadap UMK. Min% = titik masuk (sub-A), Max% = titik atas (sub-E).</div>
-            <div class="sim-table-wrap border border-slate-300">
-                <table class="w-full border-collapse border border-slate-300 text-center">
-                    <thead><tr class="bg-slate-100 border-b-2 border-slate-300 text-slate-600 font-semibold uppercase tracking-wider text-center">
-                        <th class="py-2 px-3 border border-slate-300 text-center">Grade</th>
-                        <th class="py-2 px-3 border border-slate-300 text-center">Min % UMK</th>
-                        <th class="py-2 px-3 border border-slate-300 text-center">Mid % UMK</th>
-                        <th class="py-2 px-3 border border-slate-300 text-center">Max % UMK</th>
-                        <th class="py-2 px-3 border border-slate-300 text-center">Spread (s)</th>
-                        <th class="py-2 px-3 border border-slate-300 text-center">Gap ke atas</th>
-                    </tr></thead>
-                    <tbody>${summaryRows}</tbody>
-                </table>
+            <div class="flex flex-wrap items-center justify-between gap-3 mb-2">
+                <div>
+                    <div class="card-title">📈 Visualisasi Tangga Rentang Gaji (Chart Graphic)</div>
+                    <div class="card-desc">Grafik bentuk kotak horizontal THP dari jenjang terendah (D1-A) hingga tertinggi (D6-E). Sumbu Y: Jenjang Lengkap, Sumbu X: Nominal THP.</div>
+                </div>
             </div>
-        </div>
-
-        <!-- Detail Anchor % Table (referensi) -->
-        <div class="card">
-            <div class="card-title">Detail Anchor % per Sub-Level</div>
-            <div class="card-desc">Persentase setiap sel terhadap UMK aktif (referensi detail).</div>
-            <div class="sim-table-wrap border border-slate-300">
-                <table class="w-full border-collapse border border-slate-300 text-center">
-                    <thead><tr class="bg-slate-100 border-b-2 border-slate-300 text-slate-600 font-semibold uppercase tracking-wider text-center">
-                        <th class="py-2 px-3 border border-slate-300 text-center">Grade</th>
-                        ${subLabels.map(sl => '<th class="py-2 px-3 border border-slate-300 text-center">' + sl + '</th>').join('')}
-                    </tr></thead>
-                    <tbody>${anchorRows}</tbody>
-                </table>
+            <div class="relative w-full h-[850px]">
+                <canvas id="spread-staircase-chart"></canvas>
             </div>
         </div>
 
@@ -2129,6 +2147,13 @@ function renderMenu5Baru() {
             D3 mencakup jalur D3-1 (mulai sub-level A) dan D3-2/manajerial (mulai sub-level C). Demikian pula D4.
         </div>
     `;
+
+    // Render the staircase chart after DOM update
+    setTimeout(() => {
+        if (typeof renderSpreadStaircaseChart === 'function') {
+            renderSpreadStaircaseChart(d, approachBaruParams, U, matrixSortOrder);
+        }
+    }, 50);
 }
 
 // =====================================================
